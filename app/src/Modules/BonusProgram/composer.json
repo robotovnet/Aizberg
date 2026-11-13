@@ -1,0 +1,23 @@
+{
+    "name": "aizberg/bonusprogram",
+    "description": "",
+    "authors": [
+        {
+            "name": "Sergey Chernyi",
+            "email": "2@sergeyy.ru"
+        }
+    ],
+    "extra": {
+        "laravel": {
+            "providers": [],
+            "aliases": {
+
+            }
+        }
+    },
+    "autoload": {
+        "psr-4": {
+            "Modules\\BonusProgram\\": ""
+        }
+    }
+}

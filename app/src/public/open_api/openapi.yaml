@@ -1,0 +1,3110 @@
+openapi: "3.0.3"
+info:
+  title: Aizberg Public and Marketplace API
+  version: 1.0.0
+  description: |
+    Спецификация содержит только клиентскую авторизацию, восстановление пароля и профиль, справочники стран/городов,
+    Marketplace Modules API, Api Documentation API, Blogs API и Showcase API. Защищённые операции используют cookie
+    Laravel-сессии. Маршруты `/clients`, `/cities` и `/countries` проходят middleware `ajax`;
+    клиент должен отправлять `X-Requested-With: XMLHttpRequest`.
+
+    Blogs API (`/api/blogs`) включает разделы, статьи, комментарии и ответы.
+    Публичное чтение доступно без авторизации. Создавать статьи и комментарии может
+    любой авторизованный клиент; изменять, удалять и архивировать статьи, а также
+    изменять и удалять комментарии — их автор или модератор (`blog_moderator_permissions`).
+    Управление разделами доступно клиентам из `blog_section_permissions`.
+    Защищённые методы Blogs используют `web` + `api` + `auth:client`; для JSON-ответа
+    при ошибке авторизации передавайте `Accept: application/json`. CSRF-токен для Blogs
+    не требуется. Ошибки бизнес-логики, включая отсутствие ресурса или прав, возвращают
+    HTTP 400, ошибки валидации — HTTP 422, отсутствие клиентской сессии — HTTP 401.
+
+    Showcase API (`/api/showcase`) — каталог примеров сайтов на Aizberg: категории,
+    скриншоты, список использованных модулей CMS и модерация. Публичное чтение доступно
+    без авторизации и возвращает только примеры со статусом `approved`. Добавить пример
+    может любой авторизованный клиент; новый пример получает статус `pending`. Автор может
+    редактировать свой пример только в статусах `pending` и `rejected`, после чего статус
+    снова становится `pending`. Управление категориями и модерация доступны клиентам из
+    `showcase_moderator_permissions`. Защищённые методы Showcase используют `web` + `api` +
+    `auth:client`; CSRF-токен не требуется. Коды ошибок совпадают с Blogs API.
+
+    Real Projects API (`/api/real-projects`) — публичный список проектов, в которых
+    используется Aizberg (блок «В реальных проектах»): название, ссылка на сайт и баннер.
+    Проекты добавляются в админке (Настройки → Справочники → В проектах).
+servers:
+  - url: https://api.aizberg.ru
+    description: Production
+tags:
+  - {name: Client authentication, description: 'Регистрация, вход, выход и восстановление пароля клиента'}
+  - {name: Client profile, description: Чтение и изменение профиля текущего клиента}
+  - {name: Dictionaries, description: Публичные справочники стран и городов}
+  - {name: Marketplace public, description: Публичный каталог модулей}
+  - {name: Marketplace account, description: 'Избранное, покупки и активность клиента'}
+  - {name: Marketplace seller, description: Публикация и сопровождение модулей продавцом}
+  - {name: Marketplace community, description: 'Вопросы, отзывы и оценки'}
+  - {name: Marketplace moderation, description: Блокировка модулей модераторами}
+  - {name: API docs public, description: Публичный каталог API-документаций}
+  - {name: API docs management, description: Управление документациями владельца}
+  - {name: API docs sections, description: Управление деревом разделов документации}
+  - {name: Blogs sections, description: Разделы блога с вложенностью до двух уровней}
+  - {name: Blogs articles, description: 'Статьи блога — публикация, редактирование и архивирование'}
+  - {name: Blogs comments, description: Комментарии к статьям и ответы}
+  - {name: Showcase categories, description: Категории примеров сайтов}
+  - {name: Showcase examples, description: Публичный каталог утверждённых примеров сайтов}
+  - {name: Showcase my examples, description: Добавление и редактирование примеров текущим клиентом}
+  - {name: Showcase moderation, description: Очередь модерации и операции модератора}
+  - {name: Real projects, description: Проекты на Aizberg для блока «В реальных проектах»}
+
+paths:
+  /clients/registration:
+    post:
+      tags: [Client authentication]
+      operationId: registerClient
+      summary: Зарегистрировать клиента
+      description: Создаёт учётную запись. Пароль подтверждается полем `password_confirmation`. Если серверная настройка каптчи включена, передайте `captcha` с кодом, показанным на `/captcha/image`. Сначала запросите изображение, затем отправьте регистрацию с той же cookie-сессией. Код одноразовый; после любой ошибки валидации получите новое изображение.
+      parameters: [{$ref: '#/components/parameters/AjaxHeader'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RegistrationRequest'}
+            example: {first_name: Иван, last_name: Иванов, email: user@example.com, phone: '79991234567', country_code: ru, city_id: 1, password: secret12, password_confirmation: secret12, timezone: Europe/Moscow, captcha: A7B2}
+      responses:
+        '200': {description: Клиент зарегистрирован, content: {application/json: {schema: {$ref: '#/components/schemas/RegistrationResponse'}}}}
+        '422': {$ref: '#/components/responses/ValidationError'}
+  /captcha/image:
+    get:
+      tags: [Client authentication]
+      operationId: getRegistrationCaptcha
+      summary: Получить изображение каптчи
+      description: Возвращает PNG и сохраняет ожидаемый код в cookie-сессии. Используйте cookie из ответа при отправке `/clients/registration` или `/clients/password-recovery/by-email/first-step`. Для обновления запрашивайте этот URL повторно; код одноразовый.
+      parameters:
+        - {name: _, in: query, required: false, description: Параметр для обхода кэша, schema: {type: string}, example: '1727514000000'}
+      responses:
+        '200': {description: Изображение каптчи, content: {image/png: {schema: {type: string, format: binary}}}}
+  /clients/login-by-email:
+    post:
+      tags: [Client authentication]
+      operationId: loginClientByEmail
+      summary: Войти по email
+      description: Создаёт клиентскую сессию. Ограничение — 5 попыток в минуту. Заблокированный пользователь и неверные данные дают HTTP 400.
+      parameters: [{$ref: '#/components/parameters/AjaxHeader'}]
+      requestBody: {$ref: '#/components/requestBodies/EmailLogin'}
+      responses:
+        '200': {$ref: '#/components/responses/LoginSuccess'}
+        '400': {$ref: '#/components/responses/LoginFailed'}
+        '422': {$ref: '#/components/responses/ValidationError'}
+        '429': {description: Превышен лимит попыток входа}
+  /clients/login-by-phone:
+    post:
+      tags: [Client authentication]
+      operationId: loginClientByPhone
+      summary: Войти по телефону
+      description: Телефон содержит только 11–20 цифр. Создаёт cookie-сессию; ограничение — 5 попыток в минуту.
+      parameters: [{$ref: '#/components/parameters/AjaxHeader'}]
+      requestBody: {$ref: '#/components/requestBodies/PhoneLogin'}
+      responses:
+        '200': {$ref: '#/components/responses/LoginSuccess'}
+        '400': {$ref: '#/components/responses/LoginFailed'}
+        '422': {$ref: '#/components/responses/ValidationError'}
+        '429': {description: Превышен лимит попыток входа}
+  /clients/password-recovery/by-email/first-step:
+    post:
+      tags: [Client authentication]
+      operationId: startClientPasswordRecoveryByEmail
+      summary: Отправить код восстановления пароля на email
+      description: |
+        Первый шаг восстановления пароля. Передайте email зарегистрированного клиента либо его phone
+        (11–20 цифр). Если переданы оба поля, оба проверяются, а клиент выбирается по email.
+        Шестизначный код отправляется на email найденного клиента; код и ID клиента сохраняются
+        в cookie-сессии. Повторный вызов создаёт новый код и сбрасывает счётчик попыток и подтверждение кода.
+
+        Каптча обязательна, если настройка `CAPTCHA_AT_EMAIL_RECOVERY` не равна `no`.
+        Сначала получите `/captcha/image`, затем передайте `captcha` в той же cookie-сессии.
+        После ошибки валидации получите новое изображение. При отключённой каптче поле не проверяется.
+        Все три шага выполняйте с одной cookie-сессией; предварительный вход не требуется.
+        В production требуется CSRF-токен этой сессии.
+      parameters: [{$ref: '#/components/parameters/AjaxHeader'}, {$ref: '#/components/parameters/CsrfHeader'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PasswordRecoveryFirstStepRequest'}
+            example: {email: user@example.com, captcha: A7B2}
+      responses:
+        '200': {description: Код отправлен на email клиента, content: {application/json: {schema: {$ref: '#/components/schemas/RedirectResponse'}, example: {message: success, redirect_to: /clients/password-recovery/second-step}}}}
+        '419': {description: CSRF-токен отсутствует или не соответствует сессии}
+        '422': {$ref: '#/components/responses/ValidationError'}
+  /clients/password-recovery/second-step:
+    post:
+      tags: [Client authentication]
+      operationId: verifyClientPasswordRecoveryCode
+      summary: Проверить код восстановления пароля
+      description: |
+        Второй шаг восстановления пароля. Передайте шестизначный код из письма или SMS
+        с cookie-сессией первого шага. В production требуется CSRF-токен этой сессии.
+        Количество попыток задаётся `client.max_code_entry_attempts` (по умолчанию 10).
+        Каждый запрос, прошедший валидацию, учитывается как попытка. Неверный код, отсутствие кода
+        в сессии или превышение лимита возвращают HTTP 400. Для получения нового кода и сброса
+        лимита повторите первый шаг. При успехе код и счётчик попыток удаляются, а в сессии
+        сохраняется разрешение на установку нового пароля.
+      parameters: [{$ref: '#/components/parameters/AjaxHeader'}, {$ref: '#/components/parameters/CsrfHeader'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PasswordRecoverySecondStepRequest'}
+            example: {code: '123456'}
+      responses:
+        '200': {description: Код подтверждён, content: {application/json: {schema: {$ref: '#/components/schemas/RedirectResponse'}, example: {message: success, redirect_to: /clients/password-recovery/third-step}}}}
+        '400': {description: Код неверен или отсутствует в сессии либо превышен лимит попыток, content: {application/json: {schema: {$ref: '#/components/schemas/MessageResponse'}}}}
+        '419': {description: CSRF-токен отсутствует или не соответствует сессии}
+        '422': {$ref: '#/components/responses/ValidationError'}
+  /clients/password-recovery/third-step:
+    post:
+      tags: [Client authentication]
+      operationId: completeClientPasswordRecovery
+      summary: Установить новый пароль после проверки кода
+      description: |
+        Третий шаг восстановления пароля. Выполняется после успешной проверки кода во втором шаге
+        с той же cookie-сессией. В production требуется CSRF-токен этой сессии.
+        Новый пароль должен содержать 6–20 символов и совпадать с `password_confirmation`.
+        Если в сессии нет подтверждения кода или ID клиента, возвращается HTTP 400.
+        После смены пароля ID клиента и подтверждение кода удаляются из сессии.
+        Метод возвращает `redirect_to: /clients/login`; автоматический вход не выполняется.
+      parameters: [{$ref: '#/components/parameters/AjaxHeader'}, {$ref: '#/components/parameters/CsrfHeader'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PasswordRecoveryThirdStepRequest'}
+            example: {password: newSecret12, password_confirmation: newSecret12}
+      responses:
+        '200': {description: Пароль изменён, content: {application/json: {schema: {$ref: '#/components/schemas/RedirectResponse'}, example: {message: success, redirect_to: /clients/login}}}}
+        '400': {description: Пароль не изменён — код не подтверждён или ID клиента отсутствует в сессии, content: {application/json: {schema: {$ref: '#/components/schemas/MessageResponse'}, example: {message: Пароль не был изменен.}}}}
+        '419': {description: CSRF-токен отсутствует или не соответствует сессии}
+        '422': {$ref: '#/components/responses/ValidationError'}
+  /clients/logout:
+    post:
+      tags: [Client authentication]
+      operationId: logoutClient
+      summary: Завершить клиентскую сессию
+      security: [{clientSession: []}]
+      parameters: [{$ref: '#/components/parameters/AjaxHeader'}]
+      responses:
+        '200': {description: Сессия завершена, content: {application/json: {schema: {$ref: '#/components/schemas/RedirectResponse'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+  /clients/profile:
+    get:
+      tags: [Client profile]
+      operationId: getClientProfile
+      summary: Получить профиль текущего клиента
+      description: Возвращает модель клиента без password, remember_token и внутренней связи userpic; добавляет публичный `avatar_url`.
+      security: [{clientSession: []}]
+      parameters: [{$ref: '#/components/parameters/AjaxHeader'}]
+      responses:
+        '200': {description: Профиль, content: {application/json: {schema: {$ref: '#/components/schemas/ProfileResponse'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+    patch:
+      tags: [Client profile]
+      operationId: updateClientProfile
+      summary: Частично изменить профиль
+      description: Нужно передать хотя бы одно поддерживаемое поле. Телефон очищается от нецифровых символов, код страны приводится к нижнему регистру; уникальность email/телефона проверяется без учёта текущего клиента.
+      security: [{clientSession: []}]
+      parameters: [{$ref: '#/components/parameters/AjaxHeader'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/ProfileUpdateRequest'}}}
+      responses:
+        '200': {$ref: '#/components/responses/Success'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '422': {$ref: '#/components/responses/ValidationError'}
+  /clients/change_password:
+    post:
+      tags: [Client profile]
+      operationId: changeClientPassword
+      summary: Изменить пароль
+      description: Проверяет текущий пароль и сохраняет новый. Новый пароль подтверждается `password_confirmation`.
+      security: [{clientSession: []}]
+      parameters: [{$ref: '#/components/parameters/AjaxHeader'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/ChangePasswordRequest'}, example: {current_password: oldSecret, password: newSecret, password_confirmation: newSecret}}}
+      responses:
+        '200': {$ref: '#/components/responses/Success'}
+        '400': {description: Текущий пароль неверен, content: {application/json: {schema: {$ref: '#/components/schemas/MessageResponse'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '422': {$ref: '#/components/responses/ValidationError'}
+  /cities/{country_code}/all:
+    post:
+      tags: [Dictionaries]
+      operationId: listCitiesByCountry
+      summary: Получить города страны
+      description: Возвращает пагинированный список городов по двухбуквенному коду страны.
+      parameters:
+        - {$ref: '#/components/parameters/AjaxHeader'}
+        - {name: country_code, in: path, required: true, schema: {type: string, minLength: 2, maxLength: 2}, example: ru}
+        - {$ref: '#/components/parameters/Page'}
+      responses:
+        '200': {description: Список городов, content: {application/json: {schema: {$ref: '#/components/schemas/GenericSuccess'}}}}
+  /countries/all:
+    get:
+      tags: [Dictionaries]
+      operationId: listCountries
+      summary: Получить страны
+      parameters:
+        - {$ref: '#/components/parameters/AjaxHeader'}
+        - {name: withcities, in: query, description: Значение `Y` включает города, schema: {type: string, enum: [Y, N], default: N}}
+        - {name: search, in: query, schema: {type: string, nullable: true}, description: Поиск по справочнику}
+      responses:
+        '200': {description: Список стран, content: {application/json: {schema: {$ref: '#/components/schemas/GenericSuccess'}}}}
+
+  /api/marketplace-modules/search:
+    get:
+      tags: [Marketplace public]
+      operationId: searchMarketplaceModules
+      summary: Найти публичные модули
+      description: Ищет только неархивированные и незаблокированные модули. Фильтры применяются совместно (AND); пустые значения игнорируются. Сортировка аналогична списку категории; ответ включает sort и order. Каждый успешный вызов с непустым q увеличивает счётчик запроса, включая пагинацию и поиск без результатов. Для статистики регистр и лишние пробелы игнорируются.
+      parameters:
+        - {$ref: '#/components/parameters/Search'}
+        - {$ref: '#/components/parameters/Page'}
+        - {name: category, in: query, schema: {type: string}, description: Название категории без учёта регистра}
+        - {name: license_type, in: query, schema: {$ref: '#/components/schemas/LicenseType'}, description: Точный тип лицензии, example: MIT}
+        - {name: pricing_type, in: query, schema: {type: string, enum: [free, free_trial, paid]}, description: Тип оплаты}
+        - {name: sort, in: query, schema: {type: string, default: date_added, enum: [date_added, date_updated, rating, popularity, name, pricing]}}
+        - {name: order, in: query, schema: {type: string, default: desc, enum: [asc, desc]}}
+      responses: {'200': {$ref: '#/components/responses/ModulePage'}}
+  /api/marketplace-modules/popular-searches:
+    get:
+      tags: [Marketplace public]
+      operationId: getPopularMarketplaceSearches
+      summary: Получить 10 самых популярных поисковых запросов
+      description: Возвращает до 10 запросов за всё время по убыванию searches_count; при равном счётчике первыми идут ранее сохранённые запросы. Текст приведён к нижнему регистру, пробельные последовательности заменены одним пробелом, пробелы по краям удалены. При отсутствии статистики items пуст.
+      responses:
+        '200':
+          description: Популярные поисковые запросы
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    maxItems: 10
+                    items:
+                      type: object
+                      required: [query, searches_count]
+                      properties:
+                        query: {type: string, example: seo}
+                        searches_count: {type: integer, format: int64, minimum: 1, example: 42}
+  /api/marketplace-modules/featured:
+    get:
+      tags: [Marketplace public]
+      operationId: getFeaturedMarketplaceModules
+      summary: Получить тематические подборки
+      responses: {'200': {description: Подборки модулей, content: {application/json: {schema: {$ref: '#/components/schemas/GenericSuccess'}}}}}
+  /api/marketplace-modules/categories:
+    get:
+      tags: [Marketplace public]
+      operationId: listMarketplaceCategories
+      summary: Получить категории
+      responses: {'200': {description: Категории с количеством модулей и иконками, content: {application/json: {schema: {$ref: '#/components/schemas/GenericSuccess'}}}}}
+  /api/marketplace-modules/categories/{category}:
+    get:
+      tags: [Marketplace public]
+      operationId: listMarketplaceModulesByCategory
+      summary: Получить модули категории
+      parameters:
+        - {$ref: '#/components/parameters/Category'}
+        - {$ref: '#/components/parameters/Page'}
+        - {name: sort, in: query, schema: {type: string, default: date_added, enum: [date_added, date_updated, rating, popularity, name, pricing]}}
+        - {name: order, in: query, schema: {type: string, default: desc, enum: [asc, desc]}}
+      responses: {'200': {$ref: '#/components/responses/ModulePage'}}
+  /api/marketplace-modules/modules/{slug}:
+    get:
+      tags: [Marketplace public]
+      operationId: getMarketplaceModule
+      summary: Получить полную карточку модуля
+      description: Публичный метод; при наличии клиентской сессии также вычисляет `is_favourite`. Поле `similar_modules` содержит до 5 случайных модулей из той же категории, без текущего, удалённых, архивных и заблокированных модулей.
+      parameters: [{$ref: '#/components/parameters/ModuleSlug'}]
+      responses:
+        '200': {description: Карточка модуля, content: {application/json: {schema: {$ref: '#/components/schemas/ModuleResponse'}}}}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/marketplace-modules/modules/{slug}/questions:
+    get:
+      tags: [Marketplace public]
+      operationId: listModuleQuestions
+      summary: Получить вопросы и ответы
+      parameters: [{$ref: '#/components/parameters/ModuleSlug'}, {$ref: '#/components/parameters/Page'}]
+      responses: {'200': {description: Пагинированные вопросы с ответами, content: {application/json: {schema: {$ref: '#/components/schemas/GenericSuccess'}}}}}
+    post:
+      tags: [Marketplace community]
+      operationId: askModuleQuestion
+      summary: Задать вопрос
+      security: [{clientSession: []}]
+      parameters: [{$ref: '#/components/parameters/ModuleSlug'}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [question_text], properties: {question_text: {type: string, maxLength: 20000}}}}}}
+      responses: {'200': {description: Вопрос создан, content: {application/json: {schema: {$ref: '#/components/schemas/CreatedActivityResponse'}}}}, '400': {$ref: '#/components/responses/BusinessError'}, '401': {$ref: '#/components/responses/Unauthorized'}, '422': {$ref: '#/components/responses/ValidationError'}}
+  /api/marketplace-modules/modules/{slug}/reviews:
+    get:
+      tags: [Marketplace public]
+      operationId: listModuleReviews
+      summary: Получить отзывы и оценки
+      parameters: [{$ref: '#/components/parameters/ModuleSlug'}, {$ref: '#/components/parameters/Page'}]
+      responses: {'200': {description: Пагинированные отзывы, content: {application/json: {schema: {$ref: '#/components/schemas/GenericSuccess'}}}}}
+    post:
+      tags: [Marketplace community]
+      operationId: upsertModuleReview
+      summary: Создать или заменить свой отзыв
+      security: [{clientSession: []}]
+      parameters: [{$ref: '#/components/parameters/ModuleSlug'}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [review_text], properties: {review_text: {type: string, maxLength: 50000}}}}}}
+      responses: {'200': {description: Отзыв сохранён, content: {application/json: {schema: {$ref: '#/components/schemas/CreatedActivityResponse'}}}}, '400': {$ref: '#/components/responses/BusinessError'}, '401': {$ref: '#/components/responses/Unauthorized'}, '422': {$ref: '#/components/responses/ValidationError'}}
+  /api/marketplace-modules/modules/{slug}/versions:
+    get:
+      tags: [Marketplace public]
+      operationId: listModuleVersions
+      summary: Получить историю версий
+      parameters: [{$ref: '#/components/parameters/ModuleSlug'}]
+      responses: {'200': {description: Версии, content: {application/json: {schema: {$ref: '#/components/schemas/GenericSuccess'}}}}}
+  /api/marketplace-modules/questions/{questionId}/answers:
+    post:
+      tags: [Marketplace community]
+      operationId: answerMarketplaceQuestion
+      summary: Ответить на вопрос
+      security: [{clientSession: []}]
+      parameters: [{$ref: '#/components/parameters/QuestionId'}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [answer_text], properties: {answer_text: {type: string, maxLength: 20000}}}}}}
+      responses: {'200': {description: Ответ создан, content: {application/json: {schema: {$ref: '#/components/schemas/CreatedActivityResponse'}}}}, '400': {$ref: '#/components/responses/BusinessError'}, '401': {$ref: '#/components/responses/Unauthorized'}, '422': {$ref: '#/components/responses/ValidationError'}}
+  /api/marketplace-modules/modules/{slug}/reviews/{reviewId}/helpfulness:
+    post:
+      tags: [Marketplace community]
+      operationId: markReviewHelpfulness
+      summary: Оценить полезность отзыва
+      security: [{clientSession: []}]
+      parameters: [{$ref: '#/components/parameters/ModuleSlug'}, {$ref: '#/components/parameters/ReviewId'}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [is_helpful], properties: {is_helpful: {type: boolean}}}}}}
+      responses: {'200': {description: Голос сохранён; возвращены helpful_count и unhelpful_count, content: {application/json: {schema: {$ref: '#/components/schemas/GenericSuccess'}}}}, '400': {$ref: '#/components/responses/BusinessError'}, '401': {$ref: '#/components/responses/Unauthorized'}, '422': {$ref: '#/components/responses/ValidationError'}}
+  /api/marketplace-modules/modules/{slug}/ratings:
+    post:
+      tags: [Marketplace community]
+      operationId: rateMarketplaceModule
+      summary: Поставить или изменить оценку
+      security: [{clientSession: []}]
+      parameters: [{$ref: '#/components/parameters/ModuleSlug'}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [value], properties: {value: {type: integer, minimum: 1, maximum: 5}}}}}}
+      responses: {'200': {description: Оценка и обновлённый агрегат, content: {application/json: {schema: {$ref: '#/components/schemas/GenericSuccess'}}}}, '400': {$ref: '#/components/responses/BusinessError'}, '401': {$ref: '#/components/responses/Unauthorized'}, '422': {$ref: '#/components/responses/ValidationError'}}
+  /api/marketplace-modules/favorites:
+    get:
+      tags: [Marketplace account]
+      operationId: listFavoriteModules
+      summary: Получить избранные модули
+      security: [{clientSession: []}]
+      parameters: [{$ref: '#/components/parameters/Page'}]
+      responses: {'200': {$ref: '#/components/responses/ModulePage'}, '401': {$ref: '#/components/responses/Unauthorized'}}
+  /api/marketplace-modules/modules/{slug}/favorite:
+    post:
+      tags: [Marketplace account]
+      operationId: addMarketplaceFavorite
+      summary: Добавить модуль в избранное
+      security: [{clientSession: []}]
+      parameters: [{$ref: '#/components/parameters/ModuleSlug'}]
+      responses: {'200': {description: '`is_favorite: true`', content: {application/json: {schema: {$ref: '#/components/schemas/GenericSuccess'}}}}, '400': {$ref: '#/components/responses/BusinessError'}, '401': {$ref: '#/components/responses/Unauthorized'}}
+    delete:
+      tags: [Marketplace account]
+      operationId: removeMarketplaceFavorite
+      summary: Удалить модуль из избранного
+      security: [{clientSession: []}]
+      parameters: [{$ref: '#/components/parameters/ModuleSlug'}]
+      responses: {'200': {description: '`is_favorite: false`', content: {application/json: {schema: {$ref: '#/components/schemas/GenericSuccess'}}}}, '400': {$ref: '#/components/responses/BusinessError'}, '401': {$ref: '#/components/responses/Unauthorized'}}
+  /api/marketplace-modules/my/reviews:
+    get:
+      tags: [Marketplace account]
+      operationId: listMyMarketplaceReviews
+      summary: Получить отзывы текущего клиента
+      security: [{clientSession: []}]
+      parameters: [{$ref: '#/components/parameters/Page'}]
+      responses: {'200': {description: Пагинированная активность, content: {application/json: {schema: {$ref: '#/components/schemas/GenericSuccess'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}}
+  /api/marketplace-modules/my/questions:
+    get:
+      tags: [Marketplace account]
+      operationId: listMyMarketplaceQuestions
+      summary: Получить вопросы текущего клиента
+      security: [{clientSession: []}]
+      parameters: [{$ref: '#/components/parameters/Page'}]
+      responses: {'200': {description: Пагинированная активность, content: {application/json: {schema: {$ref: '#/components/schemas/GenericSuccess'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}}
+  /api/marketplace-modules/my/purchases:
+    get:
+      tags: [Marketplace account]
+      operationId: listMyMarketplacePurchases
+      summary: Получить покупки текущего клиента
+      security: [{clientSession: []}]
+      parameters: [{$ref: '#/components/parameters/Page'}]
+      responses: {'200': {description: Пагинированные покупки, content: {application/json: {schema: {$ref: '#/components/schemas/GenericSuccess'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}}
+  /api/marketplace-modules/debug/modules/{slug}/purchase:
+    post:
+      tags: [Marketplace account]
+      operationId: debugPurchaseMarketplaceModule
+      summary: Создать тестовую покупку
+      description: Отладочный маршрут. Повторная покупка того же модуля возвращает бизнес-ошибку.
+      security: [{clientSession: []}]
+      parameters: [{$ref: '#/components/parameters/ModuleSlug'}]
+      responses: {'200': {description: Покупка создана, content: {application/json: {schema: {$ref: '#/components/schemas/GenericSuccess'}}}}, '400': {$ref: '#/components/responses/BusinessError'}, '401': {$ref: '#/components/responses/Unauthorized'}}
+  /api/marketplace-modules:
+    post:
+      tags: [Marketplace seller]
+      operationId: createMarketplaceModule
+      summary: Опубликовать модуль
+      security: [{clientSession: []}]
+      requestBody: {$ref: '#/components/requestBodies/MarketplaceModuleForm'}
+      responses: {'200': {description: Модуль создан, content: {application/json: {schema: {$ref: '#/components/schemas/ModuleMutationResponse'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}, '422': {$ref: '#/components/responses/ValidationError'}}
+  /api/marketplace-modules/{id}:
+    parameters: [{$ref: '#/components/parameters/ModuleId'}]
+    patch:
+      tags: [Marketplace seller]
+      operationId: updateMarketplaceModule
+      summary: Обновить принадлежащий клиенту модуль
+      description: Несмотря на PATCH, сервер требует полный набор основных полей формы.
+      security: [{clientSession: []}]
+      requestBody: {$ref: '#/components/requestBodies/MarketplaceModuleForm'}
+      responses: {'200': {description: Модуль обновлён, content: {application/json: {schema: {$ref: '#/components/schemas/ModuleMutationResponse'}}}}, '400': {$ref: '#/components/responses/BusinessError'}, '401': {$ref: '#/components/responses/Unauthorized'}, '422': {$ref: '#/components/responses/ValidationError'}}
+    delete:
+      tags: [Marketplace seller]
+      operationId: deleteMarketplaceModule
+      summary: Удалить принадлежащий клиенту модуль
+      security: [{clientSession: []}]
+      responses: {'200': {$ref: '#/components/responses/Success'}, '400': {$ref: '#/components/responses/BusinessError'}, '401': {$ref: '#/components/responses/Unauthorized'}}
+  /api/marketplace-modules/{id}/screenshots/{screenshotId}:
+    delete:
+      tags: [Marketplace seller]
+      operationId: deleteMarketplaceScreenshot
+      summary: Удалить скриншот своего модуля
+      security: [{clientSession: []}]
+      parameters: [{$ref: '#/components/parameters/ModuleId'}, {name: screenshotId, in: path, required: true, schema: {type: integer, minimum: 1}}]
+      responses: {'200': {$ref: '#/components/responses/Success'}, '400': {$ref: '#/components/responses/BusinessError'}, '401': {$ref: '#/components/responses/Unauthorized'}}
+  /api/marketplace-modules/{id}/changelog:
+    post:
+      tags: [Marketplace seller]
+      operationId: upsertMarketplaceChangelog
+      summary: Создать или обновить запись changelog
+      security: [{clientSession: []}]
+      parameters: [{$ref: '#/components/parameters/ModuleId'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ChangelogRequest'}}}}
+      responses: {'200': {description: Запись версии, content: {application/json: {schema: {$ref: '#/components/schemas/GenericSuccess'}}}}, '400': {$ref: '#/components/responses/BusinessError'}, '401': {$ref: '#/components/responses/Unauthorized'}, '422': {$ref: '#/components/responses/ValidationError'}}
+  /api/marketplace-modules/{id}/archive:
+    post:
+      tags: [Marketplace seller]
+      operationId: archiveMarketplaceModule
+      summary: Архивировать свой модуль
+      security: [{clientSession: []}]
+      parameters: [{$ref: '#/components/parameters/ModuleId'}]
+      responses: {'200': {description: '`is_archived: true`', content: {application/json: {schema: {$ref: '#/components/schemas/GenericSuccess'}}}}, '400': {$ref: '#/components/responses/BusinessError'}, '401': {$ref: '#/components/responses/Unauthorized'}}
+  /api/marketplace-modules/moderation/modules/{id}/block:
+    post:
+      tags: [Marketplace moderation]
+      operationId: blockMarketplaceModule
+      summary: Заблокировать модуль
+      security: [{clientSession: []}]
+      parameters: [{$ref: '#/components/parameters/ModuleId'}]
+      responses: {'200': {description: Заблокированная карточка, content: {application/json: {schema: {$ref: '#/components/schemas/ModuleMutationResponse'}}}}, '400': {$ref: '#/components/responses/BusinessError'}, '401': {$ref: '#/components/responses/Unauthorized'}}
+  /api/marketplace-modules/moderation/modules/{id}/unblock:
+    post:
+      tags: [Marketplace moderation]
+      operationId: unblockMarketplaceModule
+      summary: Разблокировать модуль
+      security: [{clientSession: []}]
+      parameters: [{$ref: '#/components/parameters/ModuleId'}]
+      responses: {'200': {description: Разблокированная карточка, content: {application/json: {schema: {$ref: '#/components/schemas/ModuleMutationResponse'}}}}, '400': {$ref: '#/components/responses/BusinessError'}, '401': {$ref: '#/components/responses/Unauthorized'}}
+
+  /api/api-documentations:
+    get:
+      tags: [API docs public]
+      operationId: listPublicApiDocumentations
+      summary: Список опубликованных документаций
+      description: Возвращает локализованные карточки; при отсутствии перевода используется default_locale.
+      parameters: [{$ref: '#/components/parameters/Search'}, {$ref: '#/components/parameters/Locale'}, {$ref: '#/components/parameters/Page'}]
+      responses: {'200': {description: Страница документаций, content: {application/json: {schema: {$ref: '#/components/schemas/ApiDocPublicPage'}}}}, '422': {$ref: '#/components/responses/ValidationError'}}
+    post:
+      tags: [API docs management]
+      operationId: createApiDocumentation
+      summary: Создать API-документацию
+      security: [{clientSession: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ApiDocCreateRequest'}}}}
+      responses: {'200': {description: Документация создана, content: {application/json: {schema: {$ref: '#/components/schemas/ApiDocCreatedResponse'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}, '422': {$ref: '#/components/responses/ValidationError'}}
+  /api/api-documentations/search:
+    get:
+      tags: [API docs public]
+      operationId: searchApiDocumentations
+      summary: Найти опубликованные документации
+      description: Поиск по slug, названиям, кратким описаниям и тегам.
+      parameters: [{$ref: '#/components/parameters/RequiredSearch'}, {$ref: '#/components/parameters/Locale'}, {$ref: '#/components/parameters/Page'}]
+      responses: {'200': {description: Результаты поиска, content: {application/json: {schema: {$ref: '#/components/schemas/ApiDocPublicPage'}}}}, '422': {$ref: '#/components/responses/ValidationError'}}
+  /api/api-documentations/manage:
+    get:
+      tags: [API docs management]
+      operationId: listOwnedApiDocumentations
+      summary: Документации текущего клиента
+      description: Включает опубликованные документы и черновики, переводимые поля возвращаются картами локалей.
+      security: [{clientSession: []}]
+      parameters: [{$ref: '#/components/parameters/Search'}, {$ref: '#/components/parameters/Page'}]
+      responses: {'200': {description: Страница документов владельца, content: {application/json: {schema: {$ref: '#/components/schemas/ApiDocManagePage'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}, '422': {$ref: '#/components/responses/ValidationError'}}
+  /api/api-documentations/manage/{id}:
+    get:
+      tags: [API docs management]
+      operationId: getOwnedApiDocumentation
+      summary: Получить документ для редактирования
+      description: Возвращает все переводы и полное дерево разделов.
+      security: [{clientSession: []}]
+      parameters: [{$ref: '#/components/parameters/DocumentationId'}]
+      responses: {'200': {description: Документ владельца, content: {application/json: {schema: {$ref: '#/components/schemas/ApiDocManage'}}}}, '400': {$ref: '#/components/responses/BusinessError'}, '401': {$ref: '#/components/responses/Unauthorized'}}
+  /api/api-documentations/{id}:
+    parameters: [{$ref: '#/components/parameters/DocumentationId'}]
+    patch:
+      tags: [API docs management]
+      operationId: updateApiDocumentation
+      summary: Частично изменить документацию
+      security: [{clientSession: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ApiDocUpdateRequest'}}}}
+      responses: {'200': {description: Документ обновлён, content: {application/json: {schema: {$ref: '#/components/schemas/ApiDocUpdatedResponse'}}}}, '400': {$ref: '#/components/responses/BusinessError'}, '401': {$ref: '#/components/responses/Unauthorized'}, '422': {$ref: '#/components/responses/ValidationError'}}
+    delete:
+      tags: [API docs management]
+      operationId: deleteApiDocumentation
+      summary: Удалить документацию
+      description: Мягкое удаление документа; его разделы перестают быть публично доступны.
+      security: [{clientSession: []}]
+      responses: {'200': {$ref: '#/components/responses/Success'}, '400': {$ref: '#/components/responses/BusinessError'}, '401': {$ref: '#/components/responses/Unauthorized'}}
+  /api/api-documentations/{documentationId}/sections:
+    post:
+      tags: [API docs sections]
+      operationId: createApiDocumentationSection
+      summary: Создать раздел
+      description: Родитель должен принадлежать документу. Максимальная глубина дерева — 3 уровня.
+      security: [{clientSession: []}]
+      parameters: [{$ref: '#/components/parameters/DocumentationIdNamed'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ApiDocSectionCreateRequest'}}}}
+      responses: {'200': {description: Раздел создан, content: {application/json: {schema: {$ref: '#/components/schemas/ApiDocSectionMutationResponse'}}}}, '400': {$ref: '#/components/responses/BusinessError'}, '401': {$ref: '#/components/responses/Unauthorized'}, '422': {$ref: '#/components/responses/ApiDocSectionValidationError'}}
+  /api/api-documentations/{documentationId}/sections/{sectionId}:
+    parameters: [{$ref: '#/components/parameters/DocumentationIdNamed'}, {$ref: '#/components/parameters/SectionId'}]
+    patch:
+      tags: [API docs sections]
+      operationId: updateApiDocumentationSection
+      summary: Частично изменить или переместить раздел
+      description: При смене parent_id пересчитывается глубина потомков; циклы и глубина больше 3 запрещены.
+      security: [{clientSession: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ApiDocSectionUpdateRequest'}}}}
+      responses: {'200': {description: Раздел обновлён, content: {application/json: {schema: {$ref: '#/components/schemas/ApiDocSectionMutationResponse'}}}}, '400': {$ref: '#/components/responses/BusinessError'}, '401': {$ref: '#/components/responses/Unauthorized'}, '422': {$ref: '#/components/responses/ApiDocSectionValidationError'}}
+    delete:
+      tags: [API docs sections]
+      operationId: deleteApiDocumentationSection
+      summary: Удалить раздел и подразделы
+      description: Физически удаляет раздел; дочерние разделы удаляются каскадно.
+      security: [{clientSession: []}]
+      responses: {'200': {$ref: '#/components/responses/Success'}, '400': {$ref: '#/components/responses/BusinessError'}, '401': {$ref: '#/components/responses/Unauthorized'}}
+  /api/api-documentations/{slug}/search:
+    get:
+      tags: [API docs public]
+      operationId: searchInsideApiDocumentation
+      summary: Поиск внутри документации
+      description: Ищет в заголовках, блоках (включая заголовок и текст карточек `card`), endpoint, схемах, параметрах и ответах опубликованного документа.
+      parameters: [{$ref: '#/components/parameters/DocumentationSlug'}, {$ref: '#/components/parameters/RequiredSearch'}, {$ref: '#/components/parameters/Locale'}]
+      responses: {'200': {description: Ранжированные совпадения разделов, content: {application/json: {schema: {$ref: '#/components/schemas/ApiDocSectionSearchResponse'}}}}, '404': {$ref: '#/components/responses/NotFound'}, '422': {$ref: '#/components/responses/ValidationError'}}
+  /api/api-documentations/{slug}:
+    get:
+      tags: [API docs public]
+      operationId: getPublicApiDocumentation
+      summary: Получить опубликованную документацию
+      description: Возвращает локализованный документ и дерево разделов.
+      parameters: [{$ref: '#/components/parameters/DocumentationSlug'}, {$ref: '#/components/parameters/Locale'}]
+      responses: {'200': {description: Полная документация, content: {application/json: {schema: {$ref: '#/components/schemas/ApiDocPublic'}}}}, '404': {$ref: '#/components/responses/NotFound'}, '422': {$ref: '#/components/responses/ValidationError'}}
+
+  /api/blogs/sections:
+    get:
+      tags: [Blogs sections]
+      summary: Список разделов (дерево)
+      description: Возвращает корневые разделы с вложенными подразделами (максимум 2 уровня).
+      operationId: listBlogSections
+      responses:
+        '200':
+          description: Дерево разделов
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlogSectionsListResponse'
+              example:
+                sections:
+                  - id: 1
+                    name: Новости
+                    slug: news
+                    parent_id: null
+                    sort_order: 0
+                    created_at: '2026-06-15T10:00:00+00:00'
+                    updated_at: '2026-06-15T10:00:00+00:00'
+                    children:
+                      - id: 2
+                        name: Обзоры
+                        slug: reviews
+                        parent_id: 1
+                        sort_order: 0
+                        created_at: '2026-06-15T10:05:00+00:00'
+                        updated_at: '2026-06-15T10:05:00+00:00'
+
+    post:
+      tags: [Blogs sections]
+      summary: Создать раздел
+      description: |
+        Требует запись в таблице `blog_section_permissions`.
+        Подраздел (`parent_id`) можно создать только внутри корневого раздела.
+      operationId: createBlogSection
+      security:
+        - clientSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BlogStoreSectionRequest'
+      responses:
+        '200':
+          description: Раздел создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlogSectionCreatedResponse'
+        '400':
+          $ref: '#/components/responses/BusinessError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/blogs/sections/{id}:
+    parameters:
+      - $ref: '#/components/parameters/BlogSectionId'
+
+    get:
+      tags: [Blogs sections]
+      summary: Получить раздел
+      operationId: getBlogSection
+      responses:
+        '200':
+          description: Данные раздела
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlogSectionResponse'
+        '400':
+          $ref: '#/components/responses/BusinessError'
+
+    patch:
+      tags: [Blogs sections]
+      summary: Обновить раздел
+      description: |
+        Требует запись в таблице `blog_section_permissions`. Все поля необязательны;
+        пустой запрос допустим и возвращает раздел без изменений.
+      operationId: updateBlogSection
+      security:
+        - clientSession: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BlogUpdateSectionRequest'
+      responses:
+        '200':
+          description: Раздел обновлён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlogSectionResponse'
+        '400':
+          $ref: '#/components/responses/BusinessError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+    delete:
+      tags: [Blogs sections]
+      summary: Удалить раздел
+      description: |
+        Требует запись в таблице `blog_section_permissions`.
+        Нельзя удалить раздел с подразделами или статьями.
+      operationId: deleteBlogSection
+      security:
+        - clientSession: []
+      responses:
+        '200':
+          description: Раздел удалён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BusinessError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/blogs/sections/{id}/articles:
+    parameters:
+      - $ref: '#/components/parameters/BlogSectionId'
+      - $ref: '#/components/parameters/Page'
+
+    get:
+      tags: [Blogs articles]
+      summary: Статьи раздела
+      description: |
+        Возвращает статьи указанного раздела. Для корневого раздела включаются
+        также статьи всех его подразделов. Архивированные статьи не показываются.
+        Контроллер не проверяет существование раздела: для неизвестного `id`
+        возвращается успешный ответ с пустым `items`.
+      operationId: listBlogArticlesByBlogSection
+      responses:
+        '200':
+          description: Список статей с пагинацией
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlogArticlesPaginatedResponse'
+
+  /api/blogs/articles:
+    get:
+      tags: [Blogs articles]
+      summary: Список статей
+      description: Архивированные статьи не включаются в выборку.
+      operationId: listBlogArticles
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - name: section_id
+          in: query
+          description: Фильтр по разделу (для корневого — включает подразделы)
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        '200':
+          description: Список статей с пагинацией
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlogArticlesPaginatedResponse'
+
+    post:
+      tags: [Blogs articles]
+      summary: Создать статью
+      description: |
+        Автор (`client_id`), `created_at` и `updated_at` заполняются автоматически.
+        Любой авторизованный клиент может создать статью.
+      operationId: createBlogArticle
+      security:
+        - clientSession: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/BlogStoreArticleRequest'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BlogStoreArticleRequestJson'
+      responses:
+        '200':
+          description: Статья создана
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlogArticleCreatedResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/blogs/articles/{id}:
+    parameters:
+      - $ref: '#/components/parameters/BlogArticleId'
+
+    get:
+      tags: [Blogs articles]
+      summary: Получить статью
+      description: Архивированные статьи недоступны через публичный просмотр.
+      operationId: getBlogArticle
+      responses:
+        '200':
+          description: Полные данные статьи
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlogArticleResponse'
+        '400':
+          $ref: '#/components/responses/BusinessError'
+
+    patch:
+      tags: [Blogs articles]
+      summary: Обновить статью
+      description: |
+        Доступно автору статьи или модератору (`blog_moderator_permissions`).
+        Все поля необязательны; пустой запрос допустим и возвращает статью без изменений.
+      operationId: updateBlogArticle
+      security:
+        - clientSession: []
+      requestBody:
+        required: false
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/BlogUpdateArticleRequest'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BlogUpdateArticleRequestJson'
+      responses:
+        '200':
+          description: Статья обновлена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlogArticleResponse'
+        '400':
+          $ref: '#/components/responses/BusinessError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+    delete:
+      tags: [Blogs articles]
+      summary: Удалить статью
+      description: |
+        Мягкое удаление (soft delete). Доступно автору или модератору.
+      operationId: deleteBlogArticle
+      security:
+        - clientSession: []
+      responses:
+        '200':
+          description: Статья удалена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BusinessError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/blogs/articles/{id}/archive:
+    parameters:
+      - $ref: '#/components/parameters/BlogArticleId'
+
+    post:
+      tags: [Blogs articles]
+      summary: Архивировать статью
+      description: |
+        Устанавливает `is_archived = true`. Доступно автору или модератору.
+        Архивированные статьи скрыты из публичных списков и просмотра.
+      operationId: archiveBlogArticle
+      security:
+        - clientSession: []
+      responses:
+        '200':
+          description: Статья архивирована
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlogArticleArchivedResponse'
+        '400':
+          $ref: '#/components/responses/BusinessError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/blogs/articles/{id}/comments:
+    parameters:
+      - $ref: '#/components/parameters/BlogArticleId'
+
+    get:
+      tags: [Blogs comments]
+      summary: Комментарии к статье
+      description: |
+        Возвращает корневые комментарии и один уровень прямых ответов в поле `replies`.
+        Архивированная статья считается не найденной.
+      operationId: listBlogComments
+      responses:
+        '200':
+          description: Дерево комментариев
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlogCommentsListResponse'
+        '400':
+          $ref: '#/components/responses/BusinessError'
+
+    post:
+      tags: [Blogs comments]
+      summary: Добавить комментарий к статье
+      description: |
+        Создаёт корневой комментарий (без `parent_id`).
+        Автор и время создания заполняются автоматически.
+      operationId: createBlogComment
+      security:
+        - clientSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BlogStoreCommentRequest'
+      responses:
+        '200':
+          description: Комментарий создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlogCommentCreatedResponse'
+        '400':
+          $ref: '#/components/responses/BusinessError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/blogs/comments/{commentId}/replies:
+    parameters:
+      - $ref: '#/components/parameters/BlogCommentId'
+
+    post:
+      tags: [Blogs comments]
+      summary: Ответить на комментарий
+      description: |
+        Создаёт ответ с `parent_id`, равным ID указанного комментария. Код разрешает
+        ответить в том числе на ответ, однако публичный список сериализует только
+        один уровень `replies`.
+      operationId: replyToBlogComment
+      security:
+        - clientSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BlogStoreCommentRequest'
+      responses:
+        '200':
+          description: Ответ создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlogCommentReplyCreatedResponse'
+        '400':
+          $ref: '#/components/responses/BusinessError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/blogs/comments/{commentId}:
+    parameters:
+      - $ref: '#/components/parameters/BlogCommentId'
+
+    patch:
+      tags: [Blogs comments]
+      summary: Редактировать комментарий
+      description: Доступно автору комментария или модератору.
+      operationId: updateBlogComment
+      security:
+        - clientSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BlogUpdateCommentRequest'
+      responses:
+        '200':
+          description: Комментарий обновлён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlogCommentUpdatedResponse'
+        '400':
+          $ref: '#/components/responses/BusinessError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+    delete:
+      tags: [Blogs comments]
+      summary: Удалить комментарий
+      description: |
+        Мягкое удаление. Доступно автору комментария или модератору.
+      operationId: deleteBlogComment
+      security:
+        - clientSession: []
+      responses:
+        '200':
+          description: Комментарий удалён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BusinessError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/showcase/categories:
+    get:
+      tags: [Showcase categories]
+      summary: Список категорий
+      description: Категории отсортированы по `sort_order`, затем по `name`.
+      operationId: listShowcaseCategories
+      responses:
+        '200':
+          description: Список категорий
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShowcaseCategoriesListResponse'
+              example:
+                categories:
+                  - id: 1
+                    name: Интернет-магазин
+                    slug: online-store
+                    sort_order: 0
+                    created_at: '2026-06-15T13:00:00+00:00'
+                    updated_at: '2026-06-15T13:00:00+00:00'
+                  - id: 2
+                    name: Блог
+                    slug: blog
+                    sort_order: 1
+                    created_at: '2026-06-15T13:00:00+00:00'
+                    updated_at: '2026-06-15T13:00:00+00:00'
+
+    post:
+      tags: [Showcase categories]
+      summary: Создать категорию
+      description: |
+        Требует запись в таблице `showcase_moderator_permissions`.
+        Если `slug` не передан, пуст или равен `null`, уникальный slug генерируется из `name`.
+      operationId: createShowcaseCategory
+      security:
+        - clientSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShowcaseStoreCategoryRequest'
+      responses:
+        '200':
+          description: Категория создана
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShowcaseCategoryCreatedResponse'
+        '400':
+          $ref: '#/components/responses/BusinessError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/showcase/categories/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ShowcaseCategoryId'
+
+    get:
+      tags: [Showcase categories]
+      summary: Получить категорию
+      operationId: getShowcaseCategory
+      responses:
+        '200':
+          description: Данные категории
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShowcaseCategoryResponse'
+        '400':
+          $ref: '#/components/responses/BusinessError'
+
+    patch:
+      tags: [Showcase categories]
+      summary: Обновить категорию
+      description: |
+        Требует запись в таблице `showcase_moderator_permissions`. Все поля необязательны;
+        пустой запрос допустим и возвращает категорию без изменений.
+      operationId: updateShowcaseCategory
+      security:
+        - clientSession: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShowcaseUpdateCategoryRequest'
+      responses:
+        '200':
+          description: Категория обновлена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShowcaseCategoryResponse'
+        '400':
+          $ref: '#/components/responses/BusinessError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+    delete:
+      tags: [Showcase categories]
+      summary: Удалить категорию
+      description: |
+        Требует запись в таблице `showcase_moderator_permissions`.
+        Нельзя удалить категорию, в которой есть хотя бы один пример сайта.
+      operationId: deleteShowcaseCategory
+      security:
+        - clientSession: []
+      responses:
+        '200':
+          description: Категория удалена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BusinessError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/showcase/categories/{id}/examples:
+    parameters:
+      - $ref: '#/components/parameters/ShowcaseCategoryId'
+      - $ref: '#/components/parameters/Page'
+
+    get:
+      tags: [Showcase examples]
+      summary: Примеры категории
+      description: |
+        Возвращает утверждённые (`approved`) примеры указанной категории, от новых к старым.
+        Для несуществующей категории возвращается HTTP 400.
+      operationId: listShowcaseExamplesByCategory
+      responses:
+        '200':
+          description: Список примеров с пагинацией
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShowcaseExamplesPaginatedResponse'
+        '400':
+          $ref: '#/components/responses/BusinessError'
+
+  /api/showcase/modules:
+    get:
+      tags: [Showcase examples]
+      summary: Использованные модули CMS
+      description: Уникальные имена модулей из утверждённых примеров, отсортированные по алфавиту.
+      operationId: listShowcaseUsedModules
+      responses:
+        '200':
+          description: Список имён модулей
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShowcaseModulesListResponse'
+              example:
+                modules: [Blogs, Catalog, Order, Shop]
+
+  /api/showcase/modules/{moduleName}/examples:
+    parameters:
+      - $ref: '#/components/parameters/ShowcaseModuleName'
+      - $ref: '#/components/parameters/Page'
+
+    get:
+      tags: [Showcase examples]
+      summary: Примеры по модулю CMS
+      description: |
+        Утверждённые примеры, в которых использован модуль с точно совпадающим именем.
+        Для неизвестного модуля возвращается успешный ответ с пустым `items`.
+      operationId: listShowcaseExamplesByModule
+      responses:
+        '200':
+          description: Список примеров с пагинацией
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShowcaseExamplesPaginatedResponse'
+
+  /api/showcase/examples:
+    get:
+      tags: [Showcase examples]
+      summary: Список примеров
+      description: Возвращает только утверждённые (`approved`) примеры, от новых к старым.
+      operationId: listShowcaseExamples
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - name: category_id
+          in: query
+          required: false
+          description: Фильтр по ID категории. Неизвестный или нечисловой ID даёт пустой `items`.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+        - name: module
+          in: query
+          required: false
+          description: Фильтр по точному имени использованного модуля CMS.
+          schema:
+            type: string
+            maxLength: 100
+      responses:
+        '200':
+          description: Список примеров с пагинацией
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShowcaseExamplesPaginatedResponse'
+
+    post:
+      tags: [Showcase my examples]
+      summary: Добавить пример сайта
+      description: |
+        Создаёт пример от имени текущего клиента со статусом `pending`.
+        Для загрузки скриншотов используйте `multipart/form-data` (поля `modules[]`, `images[]`);
+        без файлов допустим `application/json`.
+      operationId: createShowcaseExample
+      security:
+        - clientSession: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ShowcaseStoreExampleRequest'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShowcaseStoreExampleRequestJson'
+            example:
+              website_url: https://shop.example.ru
+              name: Интернет-магазин Example
+              short_description: Интернет-магазин электроники на базе Aizberg.
+              category_id: 1
+              modules: [Catalog, Shop, Order]
+      responses:
+        '200':
+          description: Пример создан и отправлен на модерацию
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShowcaseExampleCreatedResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/showcase/examples/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ShowcaseExampleId'
+
+    get:
+      tags: [Showcase examples]
+      summary: Получить пример
+      description: |
+        Возвращает только утверждённый пример. Для отсутствующего, ожидающего
+        или отклонённого примера возвращается одинаковая ошибка HTTP 400.
+      operationId: getShowcaseExample
+      responses:
+        '200':
+          description: Полные данные примера
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShowcaseExampleResponse'
+        '400':
+          $ref: '#/components/responses/BusinessError'
+
+    patch:
+      tags: [Showcase my examples]
+      summary: Обновить свой пример
+      description: |
+        Доступно автору примера только в статусах `pending` и `rejected`. Все поля необязательны.
+        После любого успешного запроса (в том числе пустого) статус становится `pending`,
+        а `approved_at` и `approver` очищаются.
+        Сначала удаляются изображения из `remove_image_ids`, затем добавляются новые `images`.
+
+        PHP не разбирает `multipart/form-data` в PATCH-запросах, поэтому для загрузки файлов
+        отправляйте `POST` с полем `_method=PATCH`.
+      operationId: updateOwnShowcaseExample
+      security:
+        - clientSession: []
+      requestBody:
+        required: false
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ShowcaseUpdateExampleRequest'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShowcaseUpdateExampleRequestJson'
+            example:
+              name: Обновлённый интернет-магазин Example
+              modules: [Catalog, Shop, Seo]
+              remove_image_ids: [15, 16]
+      responses:
+        '200':
+          description: Пример обновлён и отправлен на повторную модерацию
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShowcaseExampleResponse'
+        '400':
+          $ref: '#/components/responses/BusinessError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/showcase/my/examples:
+    get:
+      tags: [Showcase my examples]
+      summary: Мои примеры
+      description: Примеры текущего клиента во всех статусах модерации, от новых к старым.
+      operationId: listMyShowcaseExamples
+      security:
+        - clientSession: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: Список примеров с пагинацией
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShowcaseExamplesPaginatedResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/showcase/moderation/pending:
+    get:
+      tags: [Showcase moderation]
+      summary: Очередь модерации
+      description: |
+        Примеры со статусом `pending`, от новых к старым.
+        Требует запись в таблице `showcase_moderator_permissions`.
+      operationId: listPendingShowcaseExamples
+      security:
+        - clientSession: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: Список примеров с пагинацией (элементы содержат `approver`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShowcaseExamplesFullPaginatedResponse'
+        '400':
+          $ref: '#/components/responses/BusinessError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/showcase/moderation/examples/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ShowcaseExampleId'
+
+    get:
+      tags: [Showcase moderation]
+      summary: Получить пример для модерации
+      description: |
+        Возвращает неудалённый пример в любом статусе.
+        Требует запись в таблице `showcase_moderator_permissions`.
+      operationId: getShowcaseExampleForModeration
+      security:
+        - clientSession: []
+      responses:
+        '200':
+          description: Полные данные примера
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShowcaseExampleResponse'
+        '400':
+          $ref: '#/components/responses/BusinessError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    patch:
+      tags: [Showcase moderation]
+      summary: Обновить пример как модератор
+      description: |
+        Требует запись в таблице `showcase_moderator_permissions`. Поля те же, что у
+        обновления своего примера, но статус модерации и данные утверждения не меняются.
+        Для загрузки файлов отправляйте `POST` с полем `_method=PATCH`.
+      operationId: updateShowcaseExampleAsModerator
+      security:
+        - clientSession: []
+      requestBody:
+        required: false
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ShowcaseUpdateExampleRequest'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShowcaseUpdateExampleRequestJson'
+      responses:
+        '200':
+          description: Пример обновлён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShowcaseExampleResponse'
+        '400':
+          $ref: '#/components/responses/BusinessError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/showcase/moderation/examples/{id}/approve:
+    parameters:
+      - $ref: '#/components/parameters/ShowcaseExampleId'
+
+    post:
+      tags: [Showcase moderation]
+      summary: Утвердить пример
+      description: |
+        Устанавливает статус `approved`, время утверждения и текущего клиента как `approver`;
+        после этого пример виден публично. Применимо к примеру в любом статусе.
+        Требует запись в таблице `showcase_moderator_permissions`.
+      operationId: approveShowcaseExample
+      security:
+        - clientSession: []
+      responses:
+        '200':
+          description: Пример утверждён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShowcaseExampleResponse'
+        '400':
+          $ref: '#/components/responses/BusinessError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/showcase/moderation/examples/{id}/reject:
+    parameters:
+      - $ref: '#/components/parameters/ShowcaseExampleId'
+
+    post:
+      tags: [Showcase moderation]
+      summary: Отклонить пример
+      description: |
+        Устанавливает статус `rejected`, очищает `approved_at` и сохраняет текущего клиента
+        как `approver` (модератор, принявший решение). Применимо к примеру в любом статусе.
+        Требует запись в таблице `showcase_moderator_permissions`.
+      operationId: rejectShowcaseExample
+      security:
+        - clientSession: []
+      responses:
+        '200':
+          description: Пример отклонён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShowcaseExampleResponse'
+        '400':
+          $ref: '#/components/responses/BusinessError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/real-projects:
+    get:
+      tags: [Real projects]
+      operationId: listRealProjects
+      summary: Проекты на Aizberg
+      description: |
+        Данные для блока «В реальных проектах». Проекты отсортированы по порядку,
+        заданному в админке. `banner_url` — абсолютный URL баннера.
+      responses:
+        '200':
+          description: Список проектов
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RealProjectsResponse'
+              example:
+                items:
+                  - {name: Example Shop, banner_url: 'https://api.aizberg.ru/storage/real-projects/example-shop.svg', url: 'https://example-shop.com'}
+                  - {name: Example Blog, banner_url: 'https://api.aizberg.ru/storage/real-projects/example-blog.svg', url: 'https://example-blog.com'}
+
+components:
+  securitySchemes:
+    clientSession:
+      type: apiKey
+      in: cookie
+      name: aizberg_session
+      description: Cookie клиентской Laravel-сессии; фактическое имя может зависеть от конфигурации окружения.
+  parameters:
+    AjaxHeader: {name: X-Requested-With, in: header, required: true, schema: {type: string, enum: [XMLHttpRequest]}, description: Признак AJAX-запроса для middleware}
+    CsrfHeader: {name: X-XSRF-TOKEN, in: header, required: false, schema: {type: string}, description: 'В production передайте URL-декодированное значение cookie XSRF-TOKEN из той же сессии. Альтернатива — X-CSRF-TOKEN с токеном сессии или поле _token в теле запроса. В тестовых окружениях проверка отключена.'}
+    Page: {name: page, in: query, schema: {type: integer, minimum: 1, default: 1}}
+    Search: {name: q, in: query, schema: {type: string, maxLength: 255}, description: Необязательная поисковая строка}
+    RequiredSearch: {name: q, in: query, required: true, schema: {type: string, minLength: 2, maxLength: 255}}
+    Locale: {name: locale, in: query, schema: {type: string, maxLength: 16, pattern: '^[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{2,8})*$'}, example: ru}
+    ModuleSlug: {name: slug, in: path, required: true, schema: {type: string, pattern: '^[a-zA-Z0-9_-]+$'}}
+    DocumentationSlug: {name: slug, in: path, required: true, schema: {type: string, pattern: '^[a-zA-Z0-9_-]+$'}}
+    Category: {name: category, in: path, required: true, schema: {type: string}, description: URL-encoded название категории}
+    ModuleId: {name: id, in: path, required: true, schema: {type: integer, format: int64, minimum: 1}}
+    DocumentationId: {name: id, in: path, required: true, schema: {type: integer, format: int64, minimum: 1}}
+    DocumentationIdNamed: {name: documentationId, in: path, required: true, schema: {type: integer, format: int64, minimum: 1}}
+    SectionId: {name: sectionId, in: path, required: true, schema: {type: integer, format: int64, minimum: 1}}
+    QuestionId: {name: questionId, in: path, required: true, schema: {type: integer, format: int64, minimum: 1}}
+    ReviewId: {name: reviewId, in: path, required: true, schema: {type: integer, format: int64, minimum: 1}}
+    BlogSectionId:
+      name: id
+      in: path
+      required: true
+      description: ID раздела
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+
+    BlogArticleId:
+      name: id
+      in: path
+      required: true
+      description: ID статьи
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+
+    BlogCommentId:
+      name: commentId
+      in: path
+      required: true
+      description: ID комментария
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+
+    ShowcaseCategoryId:
+      name: id
+      in: path
+      required: true
+      description: ID категории
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+
+    ShowcaseExampleId:
+      name: id
+      in: path
+      required: true
+      description: ID примера сайта
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+
+    ShowcaseModuleName:
+      name: moduleName
+      in: path
+      required: true
+      description: URL-encoded имя модуля CMS (точное совпадение)
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 100
+      example: Catalog
+  requestBodies:
+    EmailLogin:
+      required: true
+      content: {application/json: {schema: {type: object, required: [email, password], properties: {email: {type: string, format: email}, password: {type: string, minLength: 6, maxLength: 20, format: password}}}, example: {email: user@example.com, password: secret12}}}
+    PhoneLogin:
+      required: true
+      content: {application/json: {schema: {type: object, required: [phone, password], properties: {phone: {type: string, pattern: '^\d{11,20}$'}, password: {type: string, minLength: 6, maxLength: 20, format: password}}}, example: {phone: '79991234567', password: secret12}}}
+    MarketplaceModuleForm:
+      required: true
+      description: Multipart-форма. Для paid обязательны price и трёхбуквенный currency; GitHub URL должны вести на github.com. До 10 скриншотов JPG/PNG/WebP по 10 МБ, icon — JPG/PNG/GIF/WebP/SVG до 4 МБ, растровые уменьшаются до 112x112 px.
+      content:
+        multipart/form-data:
+          schema: {$ref: '#/components/schemas/MarketplaceModuleWriteRequest'}
+  responses:
+    Success: {description: Операция выполнена, content: {application/json: {schema: {$ref: '#/components/schemas/SuccessResponse'}}}}
+    LoginSuccess: {description: Вход выполнен; сервер устанавливает session cookie, content: {application/json: {schema: {$ref: '#/components/schemas/LoginResponse'}}}}
+    LoginFailed: {description: Неверные реквизиты или клиент заблокирован, content: {application/json: {schema: {$ref: '#/components/schemas/MessageResponse'}}}}
+    Unauthorized: {description: Клиентская сессия отсутствует или истекла, content: {application/json: {schema: {$ref: '#/components/schemas/MessageResponse'}, example: {message: Unauthenticated.}}}}
+    ValidationError: {description: Ошибка проверки входных данных, content: {application/json: {schema: {$ref: '#/components/schemas/ValidationError'}}}}
+    BusinessError: {description: 'Ресурс не найден, не принадлежит клиенту, уже существует либо операция запрещена', content: {application/json: {schema: {$ref: '#/components/schemas/MessageResponse'}}}}
+    NotFound: {description: Публичный ресурс не найден, content: {application/json: {schema: {$ref: '#/components/schemas/MessageResponse'}}}}
+    ApiDocSectionValidationError: {description: 'Ошибка валидации либо нарушение структуры дерева (родитель не найден, цикл, глубина больше 3)', content: {application/json: {schema: {oneOf: [{$ref: '#/components/schemas/ValidationError'}, {$ref: '#/components/schemas/MessageResponse'}]}, example: {message: Документация поддерживает не более трёх уровней разделов.}}}}
+    ModulePage: {description: Пагинированный список карточек, content: {application/json: {schema: {$ref: '#/components/schemas/ModulePageResponse'}}}}
+  schemas:
+    LicenseType:
+      type: string
+      enum: [MIT, Other, GPLv2, Apache 2.0, GPLv3, BSD 3-Clause, Unlicense, BSD 2-Clause, LGPLv3, AGPLv3]
+    MessageResponse:
+      type: object
+      required: [message]
+      properties: {message: {type: string}}
+    SuccessResponse:
+      type: object
+      properties: {message: {type: string, example: success}}
+    GenericSuccess:
+      type: object
+      description: Стандартная успешная JSON-обёртка приложения; дополнительные поля зависят от операции.
+      additionalProperties: true
+      properties: {message: {type: string, example: success}}
+    ValidationError:
+      type: object
+      required: [message, errors]
+      properties:
+        message: {type: string, example: The given data was invalid.}
+        errors: {type: object, additionalProperties: {type: array, items: {type: string}}}
+    RedirectResponse:
+      type: object
+      required: [message, redirect_to]
+      properties: {message: {type: string, example: success}, redirect_to: {type: string}}
+    LoginResponse:
+      allOf:
+        - {$ref: '#/components/schemas/RedirectResponse'}
+        - {type: object, required: [session_id], properties: {session_id: {type: string, description: Идентификатор созданной сессии}}}
+    RegistrationRequest:
+      type: object
+      required: [first_name, last_name, email, phone, country_code, city_id, password, password_confirmation, timezone]
+      properties:
+        first_name: {type: string, minLength: 2, maxLength: 60}
+        last_name: {type: string, minLength: 2, maxLength: 60}
+        email: {type: string, format: email, maxLength: 100, description: Уникальный email}
+        phone: {type: string, pattern: '^\d{11,20}$', description: Уникальный телефон}
+        country_code: {type: string, minLength: 2, maxLength: 2}
+        city_id: {type: integer, minimum: 1}
+        password: {type: string, format: password, minLength: 6, maxLength: 20}
+        password_confirmation: {type: string, format: password}
+        timezone: {type: string, example: Europe/Moscow}
+        captcha: {type: string, description: Код с `/captcha/image`; обязателен при включённой серверной настройке и проверяется в той же cookie-сессии}
+    RegistrationResponse:
+      type: object
+      required: [id, message, redirect_to]
+      properties: {id: {type: integer, format: int64}, message: {type: string}, redirect_to: {type: string}}
+    PasswordRecoveryFirstStepRequest:
+      type: object
+      description: Требуется хотя бы одно из полей email или phone; каждое переданное поле должно принадлежать зарегистрированному клиенту.
+      anyOf:
+        - required: [email]
+        - required: [phone]
+      properties:
+        email: {type: string, format: email, description: Email зарегистрированного клиента; имеет приоритет при поиске клиента}
+        phone: {type: string, pattern: '^\d{11,20}$', description: Телефон зарегистрированного клиента; используется для поиска при отсутствии email}
+        captcha: {type: string, description: 'Код с `/captcha/image` из той же cookie-сессии; обязателен и проверяется, если `CAPTCHA_AT_EMAIL_RECOVERY` не равна `no`'}
+    PasswordRecoverySecondStepRequest:
+      type: object
+      required: [code]
+      properties:
+        code:
+          description: Шестизначный код восстановления; принимается как строка или целое число
+          oneOf:
+            - {type: string, pattern: '^\d{6}$'}
+            - {type: integer, minimum: 100000, maximum: 999999}
+    PasswordRecoveryThirdStepRequest:
+      type: object
+      required: [password, password_confirmation]
+      properties:
+        password: {type: string, format: password, minLength: 6, maxLength: 20}
+        password_confirmation: {type: string, format: password, description: Должно совпадать с password}
+    Client:
+      type: object
+      properties:
+        id: {type: integer, format: int64}
+        first_name: {type: string}
+        last_name: {type: string}
+        email: {type: string, format: email}
+        phone: {type: string}
+        country_code: {type: string}
+        city_id: {type: integer}
+        timezone: {type: string}
+        is_blocked: {type: string, enum: [Y, N]}
+        avatar_url: {type: string, format: uri, nullable: true}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+      additionalProperties: true
+    ProfileResponse: {type: object, required: [message, user], properties: {message: {type: string}, user: {$ref: '#/components/schemas/Client'}}}
+    ProfileUpdateRequest:
+      type: object
+      minProperties: 1
+      properties:
+        first_name: {type: string, minLength: 2, maxLength: 60}
+        last_name: {type: string, minLength: 2, maxLength: 60}
+        email: {type: string, format: email, maxLength: 100}
+        phone: {type: string, pattern: '^\d{11,20}$'}
+        country_code: {type: string, minLength: 2, maxLength: 2}
+        city_id: {type: integer, minimum: 1}
+        timezone: {type: string}
+      additionalProperties: false
+    ChangePasswordRequest:
+      type: object
+      required: [current_password, password, password_confirmation]
+      properties: {current_password: {type: string, format: password, minLength: 6, maxLength: 20}, password: {type: string, format: password, minLength: 6, maxLength: 20}, password_confirmation: {type: string, format: password}}
+    MarketplaceModuleWriteRequest:
+      type: object
+      required: [display_name, install_slug, website_url, source_code_url, license_type, pricing_type, author_display_name, short_description, category, version, version_release_date]
+      properties:
+        display_name: {type: string, maxLength: 255}
+        install_slug: {type: string, maxLength: 255, pattern: '^[a-zA-Z0-9_-]+$', description: Уникальный slug установки}
+        website_url: {type: string, format: uri, maxLength: 1024}
+        source_code_url: {type: string, format: uri, maxLength: 1024, description: URL на github.com}
+        license_type: {$ref: '#/components/schemas/LicenseType'}
+        license_url: {type: string, format: uri, nullable: true, description: URL на github.com}
+        changelog_url: {type: string, format: uri, nullable: true, description: URL на github.com}
+        pricing_type: {type: string, enum: [free, free_trial, paid]}
+        price: {type: number, format: double, minimum: 0.01, maximum: 9999999999.99, nullable: true}
+        currency: {type: string, pattern: '^[A-Z]{3}$', nullable: true, example: USD}
+        author_display_name: {type: string, maxLength: 255}
+        short_description: {type: string}
+        category: {type: string, maxLength: 30}
+        tags: {type: array, items: {type: string, maxLength: 100}}
+        version: {type: string, maxLength: 64}
+        version_release_date: {type: string, format: date}
+        detailed_description: {type: string, nullable: true}
+        icon: {type: string, format: binary}
+        screenshots: {type: array, maxItems: 10, items: {type: string, format: binary}}
+    ModuleListItem:
+      type: object
+      properties:
+        id: {type: integer, format: int64}
+        display_name: {type: string}
+        install_slug: {type: string}
+        author_display_name: {type: string}
+        short_description: {type: string}
+        category: {type: string}
+        pricing_type: {type: string, enum: [free, free_trial, paid]}
+        price: {type: string, nullable: true}
+        currency: {type: string, nullable: true}
+        icon_url: {type: string, format: uri, nullable: true}
+        aggregate_rating: {type: number, format: float}
+        ratings_count: {type: integer}
+        views_count: {type: integer}
+        is_favorite: {type: boolean}
+      additionalProperties: true
+    Module:
+      allOf:
+        - {$ref: '#/components/schemas/ModuleListItem'}
+        - type: object
+          properties:
+            website_url: {type: string, format: uri}
+            source_code_url: {type: string, format: uri}
+            license_type: {$ref: '#/components/schemas/LicenseType'}
+            license_url: {type: string, format: uri, nullable: true}
+            changelog_url: {type: string, format: uri, nullable: true}
+            detailed_description: {type: string, nullable: true}
+            tags: {type: array, items: {type: string}}
+            screenshots: {type: array, items: {type: object, additionalProperties: true}}
+            versions: {type: array, items: {$ref: '#/components/schemas/Changelog'}}
+            is_archived: {type: boolean}
+            is_blocked: {type: boolean}
+            is_favourite: {type: boolean, description: Только в публичной карточке}
+    ModuleResponse:
+      allOf:
+        - {$ref: '#/components/schemas/Module'}
+        - type: object
+          required: [similar_modules]
+          properties:
+            similar_modules:
+              type: array
+              maxItems: 5
+              items: {$ref: '#/components/schemas/SimilarModule'}
+      description: Полная карточка возвращается непосредственно в корне JSON без дополнительного поля data.
+    SimilarModule:
+      type: object
+      required: [id, icon_url, display_name, short_description, install_slug]
+      properties:
+        id: {type: integer, format: int64}
+        icon_url: {type: string, format: uri, nullable: true}
+        display_name: {type: string}
+        short_description: {type: string}
+        install_slug: {type: string}
+    ModuleMutationResponse: {type: object, required: [module], properties: {message: {type: string}, id: {type: integer}, install_slug: {type: string}, module: {$ref: '#/components/schemas/Module'}}}
+    ModulePageResponse:
+      type: object
+      properties:
+        message: {type: string}
+        items: {type: array, items: {$ref: '#/components/schemas/ModuleListItem'}}
+        current_page: {type: integer}
+        last_page: {type: integer}
+        per_page: {type: integer}
+        total: {type: integer}
+        sort: {type: string}
+        order: {type: string}
+      additionalProperties: true
+    CreatedActivityResponse: {type: object, properties: {message: {type: string}, id: {type: integer}, created_at: {type: string, format: date-time}, updated_at: {type: string, format: date-time}}}
+    ChangelogRequest: {type: object, required: [version, changes], properties: {version: {type: string, maxLength: 64}, changes: {type: array, minItems: 1, items: {type: string, maxLength: 2000}}, release_date: {type: string, format: date, nullable: true}}}
+    Changelog: {type: object, properties: {version: {type: string}, changes: {type: array, items: {type: string}}, release_date: {type: string, format: date-time}}}
+    TranslationMap:
+      type: object
+      description: Словарь «код языка → строка»; ключ соответствует шаблону locale.
+      minProperties: 1
+      additionalProperties: {type: string}
+      example: {ru: Текст, en: Text}
+    ApiDocJsonSchema:
+      description: Произвольная JSON Schema в форме JSON-объекта или массива; модуль сохраняет её без интерпретации.
+      oneOf:
+        - {type: object, additionalProperties: true}
+        - {type: array, items: {}}
+    ApiDocJsonContainer:
+      description: Произвольный JSON-объект или массив.
+      nullable: true
+      oneOf:
+        - {type: object, additionalProperties: true}
+        - {type: array, items: {}}
+    ApiDocCreateRequest:
+      type: object
+      required: [slug, name, short_description]
+      properties:
+        slug: {type: string, maxLength: 255, pattern: '^[a-zA-Z0-9_-]+$', description: 'Уникален глобально; значения `manage` и `search` запрещены.', example: seller-api}
+        name: {$ref: '#/components/schemas/TranslationMap'}
+        short_description: {$ref: '#/components/schemas/TranslationMap'}
+        tags: {type: array, nullable: true, maxItems: 50, uniqueItems: true, items: {type: string, maxLength: 100}}
+        default_locale: {type: string, maxLength: 16, pattern: '^[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{2,8})*$', description: 'По умолчанию — локаль приложения. В `name` должен быть перевод для этой локали.', example: ru}
+        is_published: {type: boolean, default: true}
+      example:
+        slug: seller-api
+        name: {ru: API продавца, en: Seller API}
+        short_description: {ru: Интеграция магазина с площадкой, en: Marketplace integration}
+        tags: [seller, orders]
+        default_locale: ru
+        is_published: true
+    ApiDocUpdateRequest:
+      type: object
+      minProperties: 1
+      description: Все поля необязательные; передаются только изменяемые.
+      properties:
+        slug: {type: string, maxLength: 255, pattern: '^[a-zA-Z0-9_-]+$'}
+        name: {$ref: '#/components/schemas/TranslationMap'}
+        short_description: {$ref: '#/components/schemas/TranslationMap'}
+        tags: {type: array, maxItems: 50, uniqueItems: true, items: {type: string, maxLength: 100}}
+        default_locale: {type: string, maxLength: 16, pattern: '^[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{2,8})*$'}
+        is_published: {type: boolean}
+    ApiDocSummary:
+      type: object
+      description: Карточка документации в публичной выдаче; переводимые поля — строки на выбранной локали.
+      required: [id, slug, name, short_description, tags, locale, default_locale, is_published, updated_at]
+      properties:
+        id: {type: integer, format: int64}
+        slug: {type: string}
+        name: {type: string, nullable: true}
+        short_description: {type: string, nullable: true}
+        tags: {type: array, items: {type: string}}
+        locale: {type: string, description: 'Фактическая локаль выдачи: запрошенная `locale`, если перевод есть, иначе `default_locale`.'}
+        default_locale: {type: string}
+        is_published: {type: boolean}
+        updated_at: {type: string, format: date-time, nullable: true}
+    ApiDocManageSummary:
+      description: Карточка документации владельца; переводимые поля — словари переводов, `locale` всегда null.
+      allOf:
+        - $ref: '#/components/schemas/ApiDocSummary'
+        - type: object
+          properties:
+            name: {$ref: '#/components/schemas/TranslationMap'}
+            short_description: {$ref: '#/components/schemas/TranslationMap'}
+            locale: {type: string, nullable: true, example: null}
+    ApiDocPageMeta:
+      type: object
+      required: [current_page, last_page, per_page, total]
+      properties:
+        current_page: {type: integer, minimum: 1}
+        last_page: {type: integer, minimum: 1}
+        per_page: {type: integer, minimum: 1, example: 20}
+        total: {type: integer, minimum: 0}
+    ApiDocPublicPage:
+      description: Страница опубликованных документаций, сортировка по updated_at по убыванию.
+      allOf:
+        - $ref: '#/components/schemas/ApiDocPageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items: {type: array, items: {$ref: '#/components/schemas/ApiDocSummary'}}
+    ApiDocManagePage:
+      description: Страница документаций текущего клиента (включая черновики), сортировка по updated_at по убыванию.
+      allOf:
+        - $ref: '#/components/schemas/ApiDocPageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items: {type: array, items: {$ref: '#/components/schemas/ApiDocManageSummary'}}
+    ApiDocPublic:
+      description: Опубликованная документация с деревом разделов, локализованная на одну локаль.
+      allOf:
+        - $ref: '#/components/schemas/ApiDocSummary'
+        - type: object
+          required: [available_locales, sections, created_at]
+          properties:
+            available_locales: {type: array, items: {type: string}, description: 'Локали из `name` документации и `title` разделов, по алфавиту.', example: [en, ru]}
+            sections: {type: array, items: {$ref: '#/components/schemas/ApiDocSectionPublic'}, description: Корневые разделы; вложенные — в children.}
+            created_at: {type: string, format: date-time, nullable: true}
+    ApiDocManage:
+      description: Документация для редактирования; все переводимые поля — словари переводов.
+      allOf:
+        - $ref: '#/components/schemas/ApiDocManageSummary'
+        - type: object
+          required: [available_locales, sections, created_at]
+          properties:
+            available_locales: {type: array, items: {type: string}}
+            sections: {type: array, items: {$ref: '#/components/schemas/ApiDocSectionManage'}}
+            created_at: {type: string, format: date-time, nullable: true}
+    ApiDocCreatedResponse:
+      type: object
+      required: [id, slug, documentation]
+      properties:
+        id: {type: integer, format: int64}
+        slug: {type: string}
+        documentation: {$ref: '#/components/schemas/ApiDocManage'}
+    ApiDocUpdatedResponse:
+      type: object
+      required: [documentation]
+      properties:
+        documentation: {$ref: '#/components/schemas/ApiDocManage'}
+    ApiDocEndpoint:
+      type: object
+      nullable: true
+      required: [method, url]
+      properties:
+        method: {type: string, enum: [GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS, TRACE], description: Регистр при записи не важен — сохраняется в верхнем регистре.}
+        url: {type: string, maxLength: 2048, example: /v1/orders}
+    ApiDocRequestBody:
+      type: object
+      nullable: true
+      required: [content_type]
+      properties:
+        content_type: {type: string, maxLength: 255, example: application/json}
+        schema: {$ref: '#/components/schemas/ApiDocJsonSchema'}
+    ApiDocParameterInput:
+      type: object
+      required: [name, required, description, type]
+      properties:
+        name: {type: string, maxLength: 255}
+        location: {type: string, nullable: true, enum: [query, path, header, cookie, body], description: 'Только для `request_parameters`.'}
+        required: {type: boolean}
+        description: {$ref: '#/components/schemas/TranslationMap'}
+        type: {type: string, maxLength: 100, example: string}
+        example: {nullable: true, description: Произвольное JSON-значение}
+    ApiDocParameterPublic:
+      allOf:
+        - $ref: '#/components/schemas/ApiDocParameterInput'
+        - type: object
+          properties:
+            description: {type: string, nullable: true}
+    ApiDocResponseInput:
+      type: object
+      required: [status_code, name, description, type]
+      description: 'Повторяющиеся `status_code` разрешены — так задаются несколько вариантов ответа с одним HTTP-кодом.'
+      properties:
+        status_code: {type: string, pattern: '^(default|[1-5][0-9]{2})$', example: '200'}
+        name: {$ref: '#/components/schemas/TranslationMap'}
+        description: {$ref: '#/components/schemas/TranslationMap'}
+        type: {type: string, maxLength: 100, example: object}
+        content_type: {type: string, nullable: true, maxLength: 255}
+        schema: {$ref: '#/components/schemas/ApiDocJsonSchema'}
+        example: {$ref: '#/components/schemas/ApiDocJsonContainer'}
+    ApiDocResponsePublic:
+      allOf:
+        - $ref: '#/components/schemas/ApiDocResponseInput'
+        - type: object
+          properties:
+            name: {type: string, nullable: true}
+            description: {type: string, nullable: true}
+    ApiDocTextBlock:
+      type: object
+      required: [type, content]
+      properties:
+        type: {type: string, enum: [text, important, code]}
+        content:
+          allOf: [{$ref: '#/components/schemas/TranslationMap'}]
+          description: |
+            Для `text` и `important` — Markdown: абзацы через `\n\n`, списки `- `, `**жирный**`,
+            `[текст](https://...)`, ссылка на раздел этой документации `[текст](section:14)`.
+            Сохраняется и отдаётся без экранирования. Для `code` — исходный код.
+        language: {type: string, maxLength: 50, nullable: true, description: 'Язык подсветки для `code`.', example: bash}
+      example:
+        type: text
+        content: {ru: 'Текст со [ссылкой](https://example.com) и **жирным**', en: 'Text with a [link](https://example.com) and **bold**'}
+    ApiDocCardBlock:
+      type: object
+      required: [type, variant, title, content]
+      properties:
+        type: {type: string, enum: [card]}
+        variant: {type: string, enum: [accent, default], description: '`accent` — голубая рамка, `default` — серая.'}
+        title: {$ref: '#/components/schemas/TranslationMap'}
+        content:
+          allOf: [{$ref: '#/components/schemas/TranslationMap'}]
+          description: 'Markdown, как у блока `text`.'
+      example:
+        type: card
+        variant: accent
+        title: {ru: 3 варианта знакомства с Aizberg, en: 3 ways to get started}
+        content: {ru: "Существует 3 способа:\n\n- Первый\n- Второй\n- Третий", en: "There are 3 ways:\n\n- First\n- Second\n- Third"}
+    ApiDocSectionLinkBlock:
+      type: object
+      required: [type, section_id, label]
+      properties:
+        type: {type: string, enum: [section_link]}
+        section_id: {type: integer, format: int64, minimum: 1, description: Раздел этой же документации; проверяется при сохранении.}
+        label: {$ref: '#/components/schemas/TranslationMap'}
+    ApiDocVariableBlock:
+      type: object
+      required: [type, name]
+      properties:
+        type: {type: string, enum: [variable]}
+        name: {type: string, maxLength: 255, example: order_id}
+        description:
+          allOf: [{$ref: '#/components/schemas/TranslationMap'}]
+          nullable: true
+    ApiDocTableBlock:
+      type: object
+      required: [type, columns]
+      properties:
+        type: {type: string, enum: [table]}
+        columns:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [key, title]
+            properties:
+              key: {type: string, description: Уникален в пределах таблицы.}
+              title: {$ref: '#/components/schemas/TranslationMap'}
+        rows:
+          type: array
+          items:
+            type: object
+            required: [cells]
+            properties:
+              cells: {type: object, description: 'Ключ — `key` столбца.', additionalProperties: {$ref: '#/components/schemas/TranslationMap'}}
+      example:
+        type: table
+        columns:
+          - {key: field, title: {ru: Поле, en: Field}}
+          - {key: meaning, title: {ru: Описание, en: Description}}
+        rows:
+          - cells: {field: {ru: id, en: id}, meaning: {ru: Идентификатор, en: Identifier}}
+    ApiDocDescriptionBlockInput:
+      description: Блок описания при записи и в методах /manage; переводимые поля — словари переводов.
+      oneOf:
+        - $ref: '#/components/schemas/ApiDocTextBlock'
+        - $ref: '#/components/schemas/ApiDocCardBlock'
+        - $ref: '#/components/schemas/ApiDocSectionLinkBlock'
+        - $ref: '#/components/schemas/ApiDocVariableBlock'
+        - $ref: '#/components/schemas/ApiDocTableBlock'
+      discriminator:
+        propertyName: type
+        mapping:
+          text: '#/components/schemas/ApiDocTextBlock'
+          important: '#/components/schemas/ApiDocTextBlock'
+          code: '#/components/schemas/ApiDocTextBlock'
+          card: '#/components/schemas/ApiDocCardBlock'
+          section_link: '#/components/schemas/ApiDocSectionLinkBlock'
+          variable: '#/components/schemas/ApiDocVariableBlock'
+          table: '#/components/schemas/ApiDocTableBlock'
+    ApiDocDescriptionBlockPublic:
+      type: object
+      description: 'Блок описания в публичной выдаче: переводимые поля (`title`, `content`, `label`, `description`, заголовки столбцов и ячейки таблицы) — строки на запрошенной локали. Markdown отдаётся без экранирования.'
+      required: [type]
+      properties:
+        type: {type: string, enum: [text, important, code, card, section_link, variable, table]}
+        variant: {type: string, enum: [accent, default], description: 'Только для `card`.'}
+        title: {type: string, nullable: true, description: 'Заголовок карточки `card`.'}
+        content: {type: string, nullable: true, description: 'Для `text`, `important`, `card` — Markdown.'}
+        language: {type: string, nullable: true}
+        section_id: {type: integer, format: int64}
+        label: {type: string, nullable: true}
+        name: {type: string}
+        description: {type: string, nullable: true}
+        columns: {type: array, items: {type: object, properties: {key: {type: string}, title: {type: string, nullable: true}}}}
+        rows: {type: array, items: {type: object, properties: {cells: {type: object, additionalProperties: {type: string, nullable: true}}}}}
+      example:
+        type: card
+        variant: accent
+        title: 3 варианта знакомства с Aizberg
+        content: "Существует 3 способа:\n\n- Первый\n- Второй\n- Третий"
+    ApiDocSectionWritableFields:
+      type: object
+      properties:
+        parent_id: {type: integer, format: int64, minimum: 1, nullable: true, description: 'Родитель из этой же документации; null — корневой раздел. Глубина дерева — не более 3 уровней.'}
+        position: {type: integer, minimum: 0, default: 0, description: Порядок среди соседних разделов.}
+        slug: {type: string, maxLength: 255, pattern: '^[a-zA-Z0-9_-]+$', description: Уникален в пределах документации.}
+        title:
+          allOf: [{$ref: '#/components/schemas/TranslationMap'}]
+          description: 'Должен содержать перевод для `default_locale` документации; значения до 500 символов.'
+        description_blocks: {type: array, items: {$ref: '#/components/schemas/ApiDocDescriptionBlockInput'}}
+        endpoint: {$ref: '#/components/schemas/ApiDocEndpoint'}
+        request_body: {$ref: '#/components/schemas/ApiDocRequestBody'}
+        request_headers: {type: array, items: {$ref: '#/components/schemas/ApiDocParameterInput'}}
+        request_parameters: {type: array, items: {$ref: '#/components/schemas/ApiDocParameterInput'}}
+        request_example: {$ref: '#/components/schemas/ApiDocJsonContainer'}
+        responses: {type: array, items: {$ref: '#/components/schemas/ApiDocResponseInput'}}
+    ApiDocSectionCreateRequest:
+      allOf:
+        - $ref: '#/components/schemas/ApiDocSectionWritableFields'
+        - type: object
+          required: [slug, title]
+      example:
+        parent_id: 10
+        position: 10
+        slug: section-1
+        title: {ru: Раздел 1, en: Section 1}
+        description_blocks:
+          - type: text
+            content: {ru: 'Текст со [ссылкой](https://example.com) и **жирным**', en: 'Text with a [link](https://example.com) and **bold**'}
+          - type: card
+            variant: accent
+            title: {ru: 3 варианта знакомства с Aizberg, en: 3 ways to get started}
+            content: {ru: "Существует 3 способа:\n\n- Первый\n- Второй\n- Третий", en: "There are 3 ways:\n\n- First\n- Second\n- Third"}
+        endpoint: null
+        request_body: null
+        request_headers: []
+        request_parameters: []
+        request_example: null
+        responses: []
+    ApiDocSectionUpdateRequest:
+      description: Все поля необязательные; передаются только изменяемые. Переданный массив заменяет прежний целиком.
+      allOf:
+        - $ref: '#/components/schemas/ApiDocSectionWritableFields'
+      example:
+        description_blocks:
+          - type: card
+            variant: default
+            title: {ru: Предварительные требования, en: Prerequisites}
+            content: {ru: "Перед установкой...\n\nNode.js: ...", en: "Before installing...\n\nNode.js: ..."}
+    ApiDocSectionPublic:
+      type: object
+      required: [id, parent_id, slug, level, position, title, description_blocks, endpoint, request_body, request_headers, request_parameters, request_example, responses, children]
+      properties:
+        id: {type: integer, format: int64}
+        parent_id: {type: integer, format: int64, nullable: true}
+        slug: {type: string}
+        level: {type: integer, minimum: 1, maximum: 3}
+        position: {type: integer, minimum: 0}
+        title: {type: string, nullable: true}
+        description_blocks: {type: array, items: {$ref: '#/components/schemas/ApiDocDescriptionBlockPublic'}}
+        endpoint: {$ref: '#/components/schemas/ApiDocEndpoint'}
+        request_body: {$ref: '#/components/schemas/ApiDocRequestBody'}
+        request_headers: {type: array, items: {$ref: '#/components/schemas/ApiDocParameterPublic'}}
+        request_parameters: {type: array, items: {$ref: '#/components/schemas/ApiDocParameterPublic'}}
+        request_example: {$ref: '#/components/schemas/ApiDocJsonContainer'}
+        responses: {type: array, items: {$ref: '#/components/schemas/ApiDocResponsePublic'}}
+        children: {type: array, items: {$ref: '#/components/schemas/ApiDocSectionPublic'}}
+    ApiDocSectionManage:
+      description: Раздел со всеми переводами.
+      allOf:
+        - $ref: '#/components/schemas/ApiDocSectionPublic'
+        - type: object
+          properties:
+            title: {$ref: '#/components/schemas/TranslationMap'}
+            description_blocks: {type: array, items: {$ref: '#/components/schemas/ApiDocDescriptionBlockInput'}}
+            request_headers: {type: array, items: {$ref: '#/components/schemas/ApiDocParameterInput'}}
+            request_parameters: {type: array, items: {$ref: '#/components/schemas/ApiDocParameterInput'}}
+            responses: {type: array, items: {$ref: '#/components/schemas/ApiDocResponseInput'}}
+            children: {type: array, items: {$ref: '#/components/schemas/ApiDocSectionManage'}}
+    ApiDocSectionMutationResponse:
+      type: object
+      required: [section]
+      properties:
+        section:
+          allOf: [{$ref: '#/components/schemas/ApiDocSectionManage'}]
+          description: 'Созданный или изменённый раздел; `children` всегда пустой массив.'
+    ApiDocSectionSearchItem:
+      type: object
+      required: [id, slug, level, title, breadcrumb, endpoint, excerpt, score]
+      properties:
+        id: {type: integer, format: int64}
+        slug: {type: string}
+        level: {type: integer, minimum: 1, maximum: 3}
+        title: {type: string}
+        breadcrumb: {type: array, items: {type: string}, description: Заголовки от корня до найденного раздела.}
+        endpoint: {$ref: '#/components/schemas/ApiDocEndpoint'}
+        excerpt: {type: string, nullable: true, description: Фрагмент текста вокруг совпадения.}
+        score: {type: integer, minimum: 0, description: 'Релевантность: совпадение в заголовке, endpoint и число вхождений.'}
+    ApiDocSectionSearchResponse:
+      type: object
+      required: [query, locale, items, total]
+      properties:
+        query: {type: string}
+        locale: {type: string}
+        items: {type: array, items: {$ref: '#/components/schemas/ApiDocSectionSearchItem'}, description: 'Отсортированы по score; не больше лимита выдачи (по умолчанию 20).'}
+        total: {type: integer, minimum: 0, description: Число найденных разделов до применения лимита выдачи.}
+      example:
+        query: публикаци
+        locale: ru
+        items:
+          - {id: 3, slug: posts, level: 1, title: Публикации, breadcrumb: [Публикации], endpoint: null, excerpt: '…', score: 63}
+        total: 1
+    BlogAuthor:
+      type: object
+      nullable: true
+      required: [id, first_name, last_name]
+      properties:
+        id:
+          type: integer
+          format: int32
+        first_name:
+          type: string
+          nullable: true
+        last_name:
+          type: string
+          nullable: true
+
+    BlogSectionBrief:
+      type: object
+      nullable: true
+      required: [id, name]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+
+    BlogSectionParent:
+      type: object
+      nullable: true
+      required: [id, name]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+
+    BlogSection:
+      type: object
+      required: [id, name, slug, parent_id, sort_order, created_at, updated_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        slug:
+          type: string
+          nullable: true
+        parent_id:
+          type: integer
+          format: int64
+          nullable: true
+        sort_order:
+          type: integer
+          format: int32
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+        children:
+          type: array
+          description: Подразделы (только в дереве корневых разделов)
+          items:
+            $ref: '#/components/schemas/BlogSection'
+
+    BlogSectionsListResponse:
+      type: object
+      required: [sections]
+      properties:
+        sections:
+          type: array
+          items:
+            $ref: '#/components/schemas/BlogSection'
+
+    BlogSectionResponse:
+      type: object
+      required: [section]
+      properties:
+        section:
+          $ref: '#/components/schemas/BlogSection'
+
+    BlogSectionCreatedResponse:
+      type: object
+      required: [id, section]
+      properties:
+        id:
+          type: integer
+          format: int64
+        section:
+          $ref: '#/components/schemas/BlogSection'
+
+    BlogStoreSectionRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        slug:
+          type: string
+          maxLength: 255
+          nullable: true
+        parent_id:
+          type: integer
+          format: int64
+          minimum: 1
+          nullable: true
+          description: ID корневого раздела для создания подраздела
+        sort_order:
+          type: integer
+          minimum: 0
+          default: 0
+
+    BlogUpdateSectionRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        slug:
+          type: string
+          maxLength: 255
+          nullable: true
+        parent_id:
+          type: integer
+          format: int64
+          minimum: 1
+          nullable: true
+        sort_order:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: При передаче `null` репозиторий приводит значение к `0`.
+
+    BlogArticleListItem:
+      type: object
+      required:
+        - id
+        - title
+        - short_description
+        - preview_image_url
+        - section_id
+        - section
+        - tags
+        - author
+        - is_archived
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: integer
+          format: int64
+        title:
+          type: string
+        short_description:
+          type: string
+        preview_image_url:
+          type: string
+          nullable: true
+        section_id:
+          type: integer
+          format: int64
+        section:
+          $ref: '#/components/schemas/BlogSectionBrief'
+        tags:
+          type: array
+          items:
+            type: string
+        author:
+          $ref: '#/components/schemas/BlogAuthor'
+        is_archived:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    BlogArticleFull:
+      allOf:
+        - $ref: '#/components/schemas/BlogArticleListItem'
+        - type: object
+          required: [content, section]
+          properties:
+            content:
+              type: string
+            section:
+              type: object
+              nullable: true
+              required: [id, name, parent]
+              properties:
+                id:
+                  type: integer
+                  format: int64
+                name:
+                  type: string
+                parent:
+                  $ref: '#/components/schemas/BlogSectionParent'
+
+    BlogArticleResponse:
+      type: object
+      required: [article]
+      properties:
+        article:
+          $ref: '#/components/schemas/BlogArticleFull'
+
+    BlogArticleCreatedResponse:
+      type: object
+      required: [id, article]
+      properties:
+        id:
+          type: integer
+          format: int64
+        article:
+          $ref: '#/components/schemas/BlogArticleFull'
+
+    BlogArticleArchivedResponse:
+      type: object
+      required: [is_archived, article]
+      properties:
+        is_archived:
+          type: boolean
+          example: true
+        article:
+          $ref: '#/components/schemas/BlogArticleFull'
+
+    BlogArticlesPaginatedResponse:
+      type: object
+      required: [items, current_page, last_page, per_page, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BlogArticleListItem'
+        current_page:
+          type: integer
+        last_page:
+          type: integer
+        per_page:
+          type: integer
+          description: Размер страницы (конфиг `blogs.articles_per_page`, по умолчанию 20)
+        total:
+          type: integer
+
+    BlogStoreArticleRequest:
+      type: object
+      required: [title, section_id, short_description, content]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+        section_id:
+          type: integer
+          format: int64
+          minimum: 1
+          description: ID раздела (корневого или подраздела)
+        short_description:
+          type: string
+          minLength: 1
+        content:
+          type: string
+          minLength: 1
+        tags:
+          type: array
+          nullable: true
+          description: Повторы и пустые после `trim` значения удаляются при сохранении.
+          items:
+            type: string
+            maxLength: 100
+        preview_image:
+          type: string
+          format: binary
+          nullable: true
+          description: Файл, проходящий Laravel-правило `image`; максимум 4096 КБ.
+
+    BlogStoreArticleRequestJson:
+      type: object
+      required: [title, section_id, short_description, content]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+        section_id:
+          type: integer
+          format: int64
+          minimum: 1
+        short_description:
+          type: string
+          minLength: 1
+        content:
+          type: string
+          minLength: 1
+        tags:
+          type: array
+          nullable: true
+          description: Повторы и пустые после `trim` значения удаляются при сохранении.
+          items:
+            type: string
+            maxLength: 100
+
+    BlogUpdateArticleRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+        section_id:
+          type: integer
+          format: int64
+          minimum: 1
+        short_description:
+          type: string
+          minLength: 1
+        content:
+          type: string
+          minLength: 1
+        tags:
+          type: array
+          nullable: true
+          description: Если поле передано массивом, оно полностью заменяет текущие теги.
+          items:
+            type: string
+            maxLength: 100
+        preview_image:
+          type: string
+          format: binary
+          nullable: true
+          description: Новое preview-изображение (заменяет предыдущее)
+
+    BlogUpdateArticleRequestJson:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+        section_id:
+          type: integer
+          format: int64
+          minimum: 1
+        short_description:
+          type: string
+          minLength: 1
+        content:
+          type: string
+          minLength: 1
+        tags:
+          type: array
+          nullable: true
+          description: Если поле передано массивом, оно полностью заменяет текущие теги.
+          items:
+            type: string
+            maxLength: 100
+
+    BlogCommentReply:
+      type: object
+      required: [id, body, author, parent_id, created_at, updated_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        body:
+          type: string
+        author:
+          $ref: '#/components/schemas/BlogAuthor'
+        parent_id:
+          type: integer
+          format: int64
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    BlogComment:
+      type: object
+      required: [id, body, author, created_at, updated_at, replies]
+      properties:
+        id:
+          type: integer
+          format: int64
+        body:
+          type: string
+        author:
+          $ref: '#/components/schemas/BlogAuthor'
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+        replies:
+          type: array
+          items:
+            $ref: '#/components/schemas/BlogCommentReply'
+
+    BlogCommentsListResponse:
+      type: object
+      required: [comments]
+      properties:
+        comments:
+          type: array
+          items:
+            $ref: '#/components/schemas/BlogComment'
+
+    BlogStoreCommentRequest:
+      type: object
+      required: [body]
+      properties:
+        body:
+          type: string
+          minLength: 1
+          maxLength: 10000
+
+    BlogUpdateCommentRequest:
+      type: object
+      required: [body]
+      properties:
+        body:
+          type: string
+          minLength: 1
+          maxLength: 10000
+
+    BlogCommentCreatedResponse:
+      type: object
+      required: [id, created_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    BlogCommentReplyCreatedResponse:
+      type: object
+      required: [id, parent_id, created_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        parent_id:
+          type: integer
+          format: int64
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    BlogCommentUpdatedResponse:
+      type: object
+      required: [comment]
+      properties:
+        comment:
+          type: object
+          required: [id, body, updated_at]
+          properties:
+            id:
+              type: integer
+              format: int64
+            body:
+              type: string
+            updated_at:
+              type: string
+              format: date-time
+              nullable: true
+
+    ShowcaseCategory:
+      type: object
+      required: [id, name, slug, sort_order, created_at, updated_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        slug:
+          type: string
+        sort_order:
+          type: integer
+          format: int32
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    ShowcaseCategoryBrief:
+      type: object
+      nullable: true
+      required: [id, name, slug]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        slug:
+          type: string
+
+    ShowcaseCategoriesListResponse:
+      type: object
+      required: [categories]
+      properties:
+        categories:
+          type: array
+          items:
+            $ref: '#/components/schemas/ShowcaseCategory'
+
+    ShowcaseCategoryResponse:
+      type: object
+      required: [category]
+      properties:
+        category:
+          $ref: '#/components/schemas/ShowcaseCategory'
+
+    ShowcaseCategoryCreatedResponse:
+      type: object
+      required: [id, category]
+      properties:
+        id:
+          type: integer
+          format: int64
+        category:
+          $ref: '#/components/schemas/ShowcaseCategory'
+
+    ShowcaseStoreCategoryRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        slug:
+          type: string
+          maxLength: 255
+          nullable: true
+          description: Уникальный slug. Если не передан, пуст или `null`, генерируется из `name`.
+        sort_order:
+          type: integer
+          minimum: 0
+          nullable: true
+          default: 0
+
+    ShowcaseUpdateCategoryRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        slug:
+          type: string
+          maxLength: 255
+          nullable: true
+          description: Уникальный slug. Пустая строка или `null` генерирует slug заново из `name`.
+        sort_order:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: При передаче `null` репозиторий приводит значение к `0`.
+
+    ShowcaseClient:
+      type: object
+      nullable: true
+      required: [id, first_name, last_name]
+      properties:
+        id:
+          type: integer
+          format: int32
+        first_name:
+          type: string
+          nullable: true
+        last_name:
+          type: string
+          nullable: true
+
+    ShowcaseExampleImage:
+      type: object
+      required: [id, url, sort_order]
+      properties:
+        id:
+          type: integer
+          format: int64
+        url:
+          type: string
+          nullable: true
+          description: Публичный URL файла на диске `SHOWCASE_DISK` (по умолчанию `public`)
+        sort_order:
+          type: integer
+          format: int32
+
+    ShowcaseExampleListItem:
+      type: object
+      required:
+        - id
+        - website_url
+        - name
+        - short_description
+        - category_id
+        - category
+        - modules
+        - images
+        - preview_image_url
+        - author
+        - moderation_status
+        - approved_at
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: integer
+          format: int64
+        website_url:
+          type: string
+          format: uri
+        name:
+          type: string
+        short_description:
+          type: string
+        category_id:
+          type: integer
+          format: int64
+        category:
+          $ref: '#/components/schemas/ShowcaseCategoryBrief'
+        modules:
+          type: array
+          description: Имена использованных модулей CMS
+          items:
+            type: string
+        images:
+          type: array
+          description: Скриншоты в порядке `sort_order`
+          items:
+            $ref: '#/components/schemas/ShowcaseExampleImage'
+        preview_image_url:
+          type: string
+          nullable: true
+          description: URL первого изображения из `images`
+        author:
+          $ref: '#/components/schemas/ShowcaseClient'
+        moderation_status:
+          type: string
+          enum: [pending, approved, rejected]
+        approved_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    ShowcaseExampleFull:
+      allOf:
+        - $ref: '#/components/schemas/ShowcaseExampleListItem'
+        - type: object
+          required: [approver]
+          properties:
+            approver:
+              allOf:
+                - $ref: '#/components/schemas/ShowcaseClient'
+              description: Модератор, утвердивший или отклонивший пример; `null` для `pending`
+
+    ShowcaseExampleResponse:
+      type: object
+      required: [example]
+      properties:
+        example:
+          $ref: '#/components/schemas/ShowcaseExampleFull'
+
+    ShowcaseExampleCreatedResponse:
+      type: object
+      required: [id, example]
+      properties:
+        id:
+          type: integer
+          format: int64
+        example:
+          $ref: '#/components/schemas/ShowcaseExampleFull'
+
+    ShowcaseExamplesPaginatedResponse:
+      type: object
+      required: [items, current_page, last_page, per_page, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ShowcaseExampleListItem'
+        current_page:
+          type: integer
+        last_page:
+          type: integer
+        per_page:
+          type: integer
+          description: Размер страницы (`SHOWCASE_EXAMPLES_PER_PAGE`, по умолчанию 20)
+        total:
+          type: integer
+
+    ShowcaseExamplesFullPaginatedResponse:
+      type: object
+      required: [items, current_page, last_page, per_page, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ShowcaseExampleFull'
+        current_page:
+          type: integer
+        last_page:
+          type: integer
+        per_page:
+          type: integer
+          description: Размер страницы (`SHOWCASE_EXAMPLES_PER_PAGE`, по умолчанию 20)
+        total:
+          type: integer
+
+    ShowcaseModulesListResponse:
+      type: object
+      required: [modules]
+      properties:
+        modules:
+          type: array
+          items:
+            type: string
+
+    ShowcaseStoreExampleRequestJson:
+      type: object
+      required: [website_url, name, short_description, category_id, modules]
+      properties:
+        website_url:
+          type: string
+          format: uri
+          maxLength: 512
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        short_description:
+          type: string
+          minLength: 1
+        category_id:
+          type: integer
+          format: int64
+          minimum: 1
+          description: ID существующей категории
+        modules:
+          type: array
+          minItems: 1
+          description: Имена модулей CMS; значения обрезаются по краям, повторы удаляются.
+          items:
+            type: string
+            maxLength: 100
+
+    ShowcaseStoreExampleRequest:
+      allOf:
+        - $ref: '#/components/schemas/ShowcaseStoreExampleRequestJson'
+        - type: object
+          properties:
+            images:
+              type: array
+              nullable: true
+              description: |
+                Скриншоты (Laravel-правило `image`, до 4096 КБ каждый). Сохраняется не более
+                `SHOWCASE_MAX_IMAGES` (по умолчанию 10) изображений, лишние файлы отбрасываются.
+              items:
+                type: string
+                format: binary
+
+    ShowcaseUpdateExampleRequestJson:
+      type: object
+      properties:
+        website_url:
+          type: string
+          format: uri
+          maxLength: 512
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        short_description:
+          type: string
+          minLength: 1
+        category_id:
+          type: integer
+          format: int64
+          minimum: 1
+          description: ID существующей категории
+        modules:
+          type: array
+          minItems: 1
+          description: Полностью заменяет текущий список модулей.
+          items:
+            type: string
+            maxLength: 100
+        remove_image_ids:
+          type: array
+          nullable: true
+          description: ID удаляемых изображений; чужие и несуществующие ID игнорируются.
+          items:
+            type: integer
+            format: int64
+
+    ShowcaseUpdateExampleRequest:
+      allOf:
+        - $ref: '#/components/schemas/ShowcaseUpdateExampleRequestJson'
+        - type: object
+          properties:
+            _method:
+              type: string
+              enum: [PATCH]
+              description: Обязательно при отправке методом `POST` (подмена метода Laravel)
+            images:
+              type: array
+              nullable: true
+              description: |
+                Новые скриншоты (до 4096 КБ каждый), добавляются к существующим. Файлы сверх
+                лимита `SHOWCASE_MAX_IMAGES` отбрасываются; если лимит уже исчерпан, сервер
+                возвращает HTTP 500.
+              items:
+                type: string
+                format: binary
+
+    RealProject:
+      type: object
+      required: [name, banner_url, url]
+      properties:
+        name: {type: string, example: Example Shop}
+        banner_url: {type: string, description: 'Абсолютный URL баннера (SVG, PNG, JPG или WEBP); хост берётся из API_HOST', example: 'https://api.aizberg.ru/storage/real-projects/example-shop.svg'}
+        url: {type: string, format: uri, example: 'https://example-shop.com'}
+
+    RealProjectsResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/RealProject'

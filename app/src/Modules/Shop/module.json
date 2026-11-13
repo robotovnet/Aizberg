@@ -1,0 +1,23 @@
+{
+    "name": "Shop",
+    "title": "Shop",
+    "authors": [
+        {
+            "name": "Sergey Chernyi",
+            "email": "2@sergeyy.ru",
+            "role": "Developer"
+        }
+    ],
+    "alias": "shop",
+    "description": "Shop Module",
+    "version": "0.1.0",
+    "minimumCoreVersion": "0.1.0",
+    "keywords": [],
+    "priority": 0,
+    "providers": [
+        "Modules\\Shop\\Providers\\ShopServiceProvider"
+    ],
+    "aliases": {},
+    "files": [],
+    "requires": ["City"]
+}

@@ -1,0 +1,4 @@
+# m h  dom mon dow   command
+15 4 * * * export DB_NAME='aizberg'; export DB_USER='user'; export DB_PWD='pwd'; export DOCKER_PATH='/srv/Aizberg'; export BACKUP_PATH='services/backups/mysql'; sh /srv/Aizberg/services/backups/mysql/mysql-backup.sh 2>/dev/null
+* * * * *   cd /srv/Aizberg && /usr/local/bin/docker-compose exec -T app php artisan schedule:run --no-interaction 2>/dev/null
+0 */6 * * * cd /srv/Aizberg && /usr/local/bin/docker-compose exec -T sphinx indexer --config /opt/sphinx/conf/sphinx.conf --rotate --all 2>/dev/null

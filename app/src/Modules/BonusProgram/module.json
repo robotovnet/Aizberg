@@ -1,0 +1,13 @@
+{
+    "name": "BonusProgram",
+    "alias": "bonusprogram",
+    "description": "",
+    "keywords": [],
+    "priority": 0,
+    "providers": [
+        "Modules\\BonusProgram\\Providers\\BonusProgramServiceProvider"
+    ],
+    "aliases": {},
+    "files": [],
+    "requires": []
+}

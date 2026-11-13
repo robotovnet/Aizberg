@@ -1,0 +1,13 @@
+{
+    "name": "RealProjects",
+    "alias": "real-projects",
+    "description": "Проекты, в которых используется Aizberg (блок «В реальных проектах»)",
+    "keywords": [],
+    "priority": 0,
+    "providers": [
+        "Modules\\RealProjects\\Providers\\RealProjectsServiceProvider"
+    ],
+    "aliases": {},
+    "files": [],
+    "requires": []
+}

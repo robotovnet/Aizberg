@@ -1,0 +1,198 @@
+openapi: 3.0.3
+
+info:
+  title: Aizberg Real Projects API
+  version: 1.0.0
+  description: |
+    Модуль RealProjects — проекты, в которых используется Aizberg (блок «В реальных проектах»).
+    У каждого проекта есть название, ссылка на сайт и баннер (SVG, PNG, JPG или WEBP).
+
+    Публичный список доступен без авторизации: `GET /api/real-projects`.
+    Проекты отсортированы по полю `sort` по возрастанию, затем по `id`.
+    `banner_url` — абсолютный URL `https://{API_HOST}/storage/real-projects/...`.
+
+    Маршруты управления (`/real-projects`) используются админкой: нужна сессия
+    сотрудника (`auth:staff`), заголовок `X-Requested-With: XMLHttpRequest` и права
+    `realprojects.view` (чтение) или `realprojects.management` (изменение).
+
+    PHP не разбирает `multipart/form-data` в PUT-запросах, поэтому для замены баннера
+    отправляйте `POST /real-projects/{id}`. `PUT` подходит для JSON-обновления без баннера.
+
+servers:
+  - url: https://api.aizberg.ru
+    description: Production
+
+tags:
+  - {name: Real projects public, description: Публичный список проектов для сайта}
+  - {name: Real projects management, description: Управление проектами из админки}
+
+paths:
+  /api/real-projects:
+    get:
+      tags: [Real projects public]
+      operationId: listRealProjects
+      summary: Проекты на Aizberg
+      description: Данные для блока «В реальных проектах».
+      responses:
+        '200':
+          description: Список проектов
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RealProjectsPublicResponse'
+              example:
+                items:
+                  - {name: Example Shop, banner_url: 'https://api.aizberg.ru/storage/real-projects/example-shop.svg', url: 'https://example-shop.com'}
+                  - {name: Example Blog, banner_url: 'https://api.aizberg.ru/storage/real-projects/example-blog.svg', url: 'https://example-blog.com'}
+
+  /real-projects:
+    get:
+      tags: [Real projects management]
+      operationId: adminListRealProjects
+      summary: Список проектов (админка)
+      security: [{staffSession: []}]
+      parameters: [{$ref: '#/components/parameters/AjaxHeader'}]
+      responses:
+        '200':
+          description: Список проектов
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/RealProject'}
+        '403': {description: Нет права realprojects.view}
+    post:
+      tags: [Real projects management]
+      operationId: adminCreateRealProject
+      summary: Добавить проект
+      security: [{staffSession: []}]
+      parameters: [{$ref: '#/components/parameters/AjaxHeader'}]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/RealProjectFields'
+                - type: object
+                  required: [banner]
+      responses:
+        '200': {description: Проект добавлен, content: {application/json: {schema: {$ref: '#/components/schemas/SuccessResponse'}}}}
+        '403': {description: Нет права realprojects.management}
+        '422': {description: Ошибка валидации}
+
+  /real-projects/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+    get:
+      tags: [Real projects management]
+      operationId: adminGetRealProject
+      summary: Проект по ID
+      security: [{staffSession: []}]
+      parameters: [{$ref: '#/components/parameters/AjaxHeader'}]
+      responses:
+        '200': {description: Проект, content: {application/json: {schema: {$ref: '#/components/schemas/RealProject'}}}}
+        '403': {description: Нет права realprojects.view}
+        '404': {description: Проект не найден}
+    post:
+      tags: [Real projects management]
+      operationId: adminUpdateRealProject
+      summary: Изменить проект (с заменой баннера)
+      description: Если поле `banner` не передано, текущий баннер сохраняется. Старый файл баннера удаляется после замены.
+      security: [{staffSession: []}]
+      parameters: [{$ref: '#/components/parameters/AjaxHeader'}]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: {$ref: '#/components/schemas/RealProjectFields'}
+      responses:
+        '200': {description: Проект изменён, content: {application/json: {schema: {$ref: '#/components/schemas/SuccessResponse'}}}}
+        '403': {description: Нет права realprojects.management}
+        '404': {description: Проект не найден}
+        '422': {description: Ошибка валидации}
+    put:
+      tags: [Real projects management]
+      operationId: adminUpdateRealProjectJson
+      summary: Изменить проект без замены баннера
+      security: [{staffSession: []}]
+      parameters: [{$ref: '#/components/parameters/AjaxHeader'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RealProjectFieldsJson'}
+      responses:
+        '200': {description: Проект изменён, content: {application/json: {schema: {$ref: '#/components/schemas/SuccessResponse'}}}}
+        '403': {description: Нет права realprojects.management}
+        '404': {description: Проект не найден}
+        '422': {description: Ошибка валидации}
+    delete:
+      tags: [Real projects management]
+      operationId: adminDeleteRealProject
+      summary: Удалить проект
+      description: Удаляет проект и файл его баннера.
+      security: [{staffSession: []}]
+      parameters: [{$ref: '#/components/parameters/AjaxHeader'}]
+      responses:
+        '200': {description: Проект удалён, content: {application/json: {schema: {$ref: '#/components/schemas/SuccessResponse'}}}}
+        '403': {description: Нет права realprojects.management}
+        '404': {description: Проект не найден}
+
+components:
+  securitySchemes:
+    staffSession:
+      type: apiKey
+      in: cookie
+      name: aizberg_session
+      description: Cookie сессии сотрудника; фактическое имя может зависеть от конфигурации окружения.
+  parameters:
+    AjaxHeader: {name: X-Requested-With, in: header, required: true, schema: {type: string, enum: [XMLHttpRequest]}, description: Признак AJAX-запроса для middleware}
+  schemas:
+    SuccessResponse:
+      type: object
+      properties: {message: {type: string, example: success}}
+
+    RealProjectPublic:
+      type: object
+      required: [name, banner_url, url]
+      properties:
+        name: {type: string, example: Example Shop}
+        banner_url: {type: string, description: 'Абсолютный URL баннера (хост из API_HOST)', example: 'https://api.aizberg.ru/storage/real-projects/example-shop.svg'}
+        url: {type: string, format: uri, example: 'https://example-shop.com'}
+
+    RealProjectsPublicResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/RealProjectPublic'}
+
+    RealProject:
+      type: object
+      required: [id, name, url, sort, banner_url]
+      properties:
+        id: {type: integer, example: 1}
+        name: {type: string, example: Example Shop}
+        url: {type: string, format: uri, example: 'https://example-shop.com'}
+        sort: {type: integer, example: 500}
+        banner_url: {type: string, example: 'https://api.aizberg.ru/storage/real-projects/example-shop.svg'}
+
+    RealProjectFieldsJson:
+      type: object
+      required: [name, url]
+      properties:
+        name: {type: string, maxLength: 255}
+        url: {type: string, format: uri, maxLength: 2048, description: Ссылка на сайт, только http:// или https://}
+        sort: {type: integer, minimum: 0, maximum: 1000000, nullable: true, default: 500, description: 'Порядок вывода, по возрастанию; пустое значение — 500'}
+
+    RealProjectFields:
+      allOf:
+        - $ref: '#/components/schemas/RealProjectFieldsJson'
+        - type: object
+          properties:
+            banner:
+              type: string
+              format: binary
+              description: Баннер SVG, PNG, JPG или WEBP, до 4096 КБ

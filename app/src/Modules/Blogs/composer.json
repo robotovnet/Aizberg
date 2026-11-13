@@ -1,0 +1,22 @@
+{
+    "name": "aizberg/blogs",
+    "description": "",
+    "type": "laravel-module",
+    "authors": [
+        {
+            "name": "Sergey Chernyi",
+            "email": "2@sergeyy.ru"
+        }
+    ],
+    "extra": {
+        "laravel": {
+            "providers": [],
+            "aliases": {}
+        }
+    },
+    "autoload": {
+        "psr-4": {
+            "Modules\\Blogs\\": ""
+        }
+    }
+}

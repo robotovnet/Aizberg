@@ -1,0 +1,23 @@
+{
+    "name": "Showcase",
+    "title": "Showcase",
+    "authors": [
+        {
+            "name": "Sergey Chernyi",
+            "email": "2@sergeyy.ru",
+            "role": "Developer"
+        }
+    ],
+    "description": "Каталог примеров сайтов на Aizberg с модерацией",
+    "alias": "showcase",
+    "version": "0.1.0",
+    "minimumCoreVersion": "0.1.0",
+    "keywords": [],
+    "priority": 0,
+    "providers": [
+        "Modules\\Showcase\\Providers\\ShowcaseServiceProvider"
+    ],
+    "aliases": {},
+    "files": [],
+    "requires": ["Client"]
+}

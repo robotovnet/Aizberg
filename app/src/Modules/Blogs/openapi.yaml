@@ -1,0 +1,1088 @@
+openapi: 3.0.3
+info:
+  title: Blogs API
+  description: |
+    REST API модуля **Blogs** — статьи, разделы (не более 2 уровней вложенности),
+    комментарии и ответы на них.
+
+    ## Базовый URL
+    Все маршруты доступны по префиксу `/api/blogs`.
+
+    ## Аутентификация
+    Защищённые endpoints используют middleware `web` + `api` + `auth:client` — активную
+    сессию клиента (таблица `clients`, guard `client`). Передаётся cookie после входа клиента
+    (`texnocentr_magazin_elektroniki_session` в рабочем окружении; имя задаётся через
+    `SESSION_COOKIE`).
+    Для получения JSON-ответа при ошибке аутентификации клиент должен отправлять
+    `Accept: application/json`, иначе middleware может перенаправить его на страницу входа.
+
+    Для маршрутов этого модуля middleware проверки CSRF явно исключён. Передавать
+    `X-XSRF-TOKEN`, `X-CSRF-TOKEN` или поле `_token` не требуется.
+
+    ## Права доступа
+    | Действие | Кто может |
+    |---|---|
+    | Создание статей | Любой авторизованный клиент |
+    | Редактирование / удаление / архивирование статьи | Автор статьи или модератор (`blog_moderator_permissions`) |
+    | CRUD разделов | Клиенты из `blog_section_permissions` |
+    | Создание комментариев и ответов | Любой авторизованный клиент |
+    | Редактирование / удаление комментария | Автор комментария или модератор |
+
+    ## Формат ответов
+    - Успех: HTTP `200`, тело — JSON с данными (без обёртки `success`).
+    - Ошибка бизнес-логики: HTTP `400`, `{ "message": "..." }`.
+    - Ошибка валидации: HTTP `422`, стандартный формат Laravel (`message`, `errors`).
+    - Не авторизован: HTTP `401` (при `Accept: application/json`).
+  version: 1.0.0
+  contact:
+    name: AIZBERG Blogs Module
+
+servers:
+  - url: /api/blogs
+    description: API блога (относительный путь)
+
+tags:
+  - name: Sections
+    description: Разделы блога (корневые и подразделы)
+  - name: Articles
+    description: Статьи блога
+  - name: Comments
+    description: Комментарии к статьям и ответы
+
+paths:
+  /sections:
+    get:
+      tags: [Sections]
+      summary: Список разделов (дерево)
+      description: Возвращает корневые разделы с вложенными подразделами (максимум 2 уровня).
+      operationId: listSections
+      responses:
+        '200':
+          description: Дерево разделов
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SectionsListResponse'
+              example:
+                sections:
+                  - id: 1
+                    name: Новости
+                    slug: news
+                    parent_id: null
+                    sort_order: 0
+                    created_at: '2026-06-15T10:00:00+00:00'
+                    updated_at: '2026-06-15T10:00:00+00:00'
+                    children:
+                      - id: 2
+                        name: Обзоры
+                        slug: reviews
+                        parent_id: 1
+                        sort_order: 0
+                        created_at: '2026-06-15T10:05:00+00:00'
+                        updated_at: '2026-06-15T10:05:00+00:00'
+
+    post:
+      tags: [Sections]
+      summary: Создать раздел
+      description: |
+        Требует запись в таблице `blog_section_permissions`.
+        Подраздел (`parent_id`) можно создать только внутри корневого раздела.
+      operationId: createSection
+      security:
+        - clientSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StoreSectionRequest'
+      responses:
+        '200':
+          description: Раздел создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SectionCreatedResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /sections/{id}:
+    parameters:
+      - $ref: '#/components/parameters/SectionId'
+
+    get:
+      tags: [Sections]
+      summary: Получить раздел
+      operationId: getSection
+      responses:
+        '200':
+          description: Данные раздела
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SectionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+    patch:
+      tags: [Sections]
+      summary: Обновить раздел
+      description: |
+        Требует запись в таблице `blog_section_permissions`. Все поля необязательны;
+        пустой запрос допустим и возвращает раздел без изменений.
+      operationId: updateSection
+      security:
+        - clientSession: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSectionRequest'
+      responses:
+        '200':
+          description: Раздел обновлён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SectionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+    delete:
+      tags: [Sections]
+      summary: Удалить раздел
+      description: |
+        Требует запись в таблице `blog_section_permissions`.
+        Нельзя удалить раздел с подразделами или статьями.
+      operationId: deleteSection
+      security:
+        - clientSession: []
+      responses:
+        '200':
+          description: Раздел удалён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessMessageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /sections/{id}/articles:
+    parameters:
+      - $ref: '#/components/parameters/SectionId'
+      - $ref: '#/components/parameters/Page'
+
+    get:
+      tags: [Articles]
+      summary: Статьи раздела
+      description: |
+        Возвращает статьи указанного раздела. Для корневого раздела включаются
+        также статьи всех его подразделов. Архивированные статьи не показываются.
+        Контроллер не проверяет существование раздела: для неизвестного `id`
+        возвращается успешный ответ с пустым `items`.
+      operationId: listArticlesBySection
+      responses:
+        '200':
+          description: Список статей с пагинацией
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArticlesPaginatedResponse'
+
+  /articles:
+    get:
+      tags: [Articles]
+      summary: Список статей
+      description: Архивированные статьи не включаются в выборку.
+      operationId: listArticles
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - name: section_id
+          in: query
+          description: Фильтр по разделу (для корневого — включает подразделы)
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        '200':
+          description: Список статей с пагинацией
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArticlesPaginatedResponse'
+
+    post:
+      tags: [Articles]
+      summary: Создать статью
+      description: |
+        Автор (`client_id`), `created_at` и `updated_at` заполняются автоматически.
+        Любой авторизованный клиент может создать статью.
+      operationId: createArticle
+      security:
+        - clientSession: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/StoreArticleRequest'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StoreArticleRequestJson'
+      responses:
+        '200':
+          description: Статья создана
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArticleCreatedResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /articles/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ArticleId'
+
+    get:
+      tags: [Articles]
+      summary: Получить статью
+      description: Архивированные статьи недоступны через публичный просмотр.
+      operationId: getArticle
+      responses:
+        '200':
+          description: Полные данные статьи
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArticleResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+    patch:
+      tags: [Articles]
+      summary: Обновить статью
+      description: |
+        Доступно автору статьи или модератору (`blog_moderator_permissions`).
+        Все поля необязательны; пустой запрос допустим и возвращает статью без изменений.
+      operationId: updateArticle
+      security:
+        - clientSession: []
+      requestBody:
+        required: false
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UpdateArticleRequest'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateArticleRequestJson'
+      responses:
+        '200':
+          description: Статья обновлена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArticleResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+    delete:
+      tags: [Articles]
+      summary: Удалить статью
+      description: |
+        Мягкое удаление (soft delete). Доступно автору или модератору.
+      operationId: deleteArticle
+      security:
+        - clientSession: []
+      responses:
+        '200':
+          description: Статья удалена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessMessageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /articles/{id}/archive:
+    parameters:
+      - $ref: '#/components/parameters/ArticleId'
+
+    post:
+      tags: [Articles]
+      summary: Архивировать статью
+      description: |
+        Устанавливает `is_archived = true`. Доступно автору или модератору.
+        Архивированные статьи скрыты из публичных списков и просмотра.
+      operationId: archiveArticle
+      security:
+        - clientSession: []
+      responses:
+        '200':
+          description: Статья архивирована
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArticleArchivedResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /articles/{id}/comments:
+    parameters:
+      - $ref: '#/components/parameters/ArticleId'
+
+    get:
+      tags: [Comments]
+      summary: Комментарии к статье
+      description: |
+        Возвращает корневые комментарии и один уровень прямых ответов в поле `replies`.
+        Архивированная статья считается не найденной.
+      operationId: listComments
+      responses:
+        '200':
+          description: Дерево комментариев
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommentsListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+    post:
+      tags: [Comments]
+      summary: Добавить комментарий к статье
+      description: |
+        Создаёт корневой комментарий (без `parent_id`).
+        Автор и время создания заполняются автоматически.
+      operationId: createComment
+      security:
+        - clientSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StoreCommentRequest'
+      responses:
+        '200':
+          description: Комментарий создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommentCreatedResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /comments/{commentId}/replies:
+    parameters:
+      - $ref: '#/components/parameters/CommentId'
+
+    post:
+      tags: [Comments]
+      summary: Ответить на комментарий
+      description: |
+        Создаёт ответ с `parent_id`, равным ID указанного комментария. Код разрешает
+        ответить в том числе на ответ, однако публичный список сериализует только
+        один уровень `replies`.
+      operationId: replyToComment
+      security:
+        - clientSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StoreCommentRequest'
+      responses:
+        '200':
+          description: Ответ создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommentReplyCreatedResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /comments/{commentId}:
+    parameters:
+      - $ref: '#/components/parameters/CommentId'
+
+    patch:
+      tags: [Comments]
+      summary: Редактировать комментарий
+      description: Доступно автору комментария или модератору.
+      operationId: updateComment
+      security:
+        - clientSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCommentRequest'
+      responses:
+        '200':
+          description: Комментарий обновлён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommentUpdatedResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+    delete:
+      tags: [Comments]
+      summary: Удалить комментарий
+      description: |
+        Мягкое удаление. Доступно автору комментария или модератору.
+      operationId: deleteComment
+      security:
+        - clientSession: []
+      responses:
+        '200':
+          description: Комментарий удалён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessMessageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+components:
+  securitySchemes:
+    clientSession:
+      type: apiKey
+      in: cookie
+      name: texnocentr_magazin_elektroniki_session
+      description: |
+        Cookie сессии Laravel после авторизации клиента (guard `client`). Имя должно
+        совпадать со значением `SESSION_COOKIE`; в рабочем окружении используется
+        `texnocentr_magazin_elektroniki_session`.
+        CSRF-токен для маршрутов Blogs не требуется.
+
+  parameters:
+    SectionId:
+      name: id
+      in: path
+      required: true
+      description: ID раздела
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+
+    ArticleId:
+      name: id
+      in: path
+      required: true
+      description: ID статьи
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+
+    CommentId:
+      name: commentId
+      in: path
+      required: true
+      description: ID комментария
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+
+    Page:
+      name: page
+      in: query
+      description: Номер страницы (по умолчанию 1)
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+
+  responses:
+    BadRequest:
+      description: Ошибка бизнес-логики или ресурс не найден
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            notFound:
+              value:
+                message: Статья не найдена.
+            forbidden:
+              value:
+                message: Нет прав на редактирование статьи.
+
+    Unauthorized:
+      description: Клиент не авторизован
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            message: Unauthenticated.
+
+    ValidationError:
+      description: Ошибка валидации входных данных
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ValidationErrorResponse'
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          example: Статья не найдена.
+
+    ValidationErrorResponse:
+      type: object
+      required: [message, errors]
+      properties:
+        message:
+          type: string
+          example: The given data was invalid.
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+          example:
+            title:
+              - The title field is required.
+
+    SuccessMessageResponse:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          example: success
+
+    Author:
+      type: object
+      nullable: true
+      required: [id, first_name, last_name]
+      properties:
+        id:
+          type: integer
+          format: int32
+        first_name:
+          type: string
+          nullable: true
+        last_name:
+          type: string
+          nullable: true
+
+    SectionBrief:
+      type: object
+      nullable: true
+      required: [id, name]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+
+    SectionParent:
+      type: object
+      nullable: true
+      required: [id, name]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+
+    Section:
+      type: object
+      required: [id, name, slug, parent_id, sort_order, created_at, updated_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        slug:
+          type: string
+          nullable: true
+        parent_id:
+          type: integer
+          format: int64
+          nullable: true
+        sort_order:
+          type: integer
+          format: int32
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+        children:
+          type: array
+          description: Подразделы (только в дереве корневых разделов)
+          items:
+            $ref: '#/components/schemas/Section'
+
+    SectionsListResponse:
+      type: object
+      required: [sections]
+      properties:
+        sections:
+          type: array
+          items:
+            $ref: '#/components/schemas/Section'
+
+    SectionResponse:
+      type: object
+      required: [section]
+      properties:
+        section:
+          $ref: '#/components/schemas/Section'
+
+    SectionCreatedResponse:
+      type: object
+      required: [id, section]
+      properties:
+        id:
+          type: integer
+          format: int64
+        section:
+          $ref: '#/components/schemas/Section'
+
+    StoreSectionRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        slug:
+          type: string
+          maxLength: 255
+          nullable: true
+        parent_id:
+          type: integer
+          format: int64
+          minimum: 1
+          nullable: true
+          description: ID корневого раздела для создания подраздела
+        sort_order:
+          type: integer
+          minimum: 0
+          default: 0
+
+    UpdateSectionRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        slug:
+          type: string
+          maxLength: 255
+          nullable: true
+        parent_id:
+          type: integer
+          format: int64
+          minimum: 1
+          nullable: true
+        sort_order:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: При передаче `null` репозиторий приводит значение к `0`.
+
+    ArticleListItem:
+      type: object
+      required:
+        - id
+        - title
+        - short_description
+        - preview_image_url
+        - section_id
+        - section
+        - tags
+        - author
+        - is_archived
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: integer
+          format: int64
+        title:
+          type: string
+        short_description:
+          type: string
+        preview_image_url:
+          type: string
+          nullable: true
+        section_id:
+          type: integer
+          format: int64
+        section:
+          $ref: '#/components/schemas/SectionBrief'
+        tags:
+          type: array
+          items:
+            type: string
+        author:
+          $ref: '#/components/schemas/Author'
+        is_archived:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    ArticleFull:
+      allOf:
+        - $ref: '#/components/schemas/ArticleListItem'
+        - type: object
+          required: [content, section]
+          properties:
+            content:
+              type: string
+            section:
+              type: object
+              nullable: true
+              required: [id, name, parent]
+              properties:
+                id:
+                  type: integer
+                  format: int64
+                name:
+                  type: string
+                parent:
+                  $ref: '#/components/schemas/SectionParent'
+
+    ArticleResponse:
+      type: object
+      required: [article]
+      properties:
+        article:
+          $ref: '#/components/schemas/ArticleFull'
+
+    ArticleCreatedResponse:
+      type: object
+      required: [id, article]
+      properties:
+        id:
+          type: integer
+          format: int64
+        article:
+          $ref: '#/components/schemas/ArticleFull'
+
+    ArticleArchivedResponse:
+      type: object
+      required: [is_archived, article]
+      properties:
+        is_archived:
+          type: boolean
+          example: true
+        article:
+          $ref: '#/components/schemas/ArticleFull'
+
+    ArticlesPaginatedResponse:
+      type: object
+      required: [items, current_page, last_page, per_page, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArticleListItem'
+        current_page:
+          type: integer
+        last_page:
+          type: integer
+        per_page:
+          type: integer
+          description: Размер страницы (конфиг `blogs.articles_per_page`, по умолчанию 20)
+        total:
+          type: integer
+
+    StoreArticleRequest:
+      type: object
+      required: [title, section_id, short_description, content]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+        section_id:
+          type: integer
+          format: int64
+          minimum: 1
+          description: ID раздела (корневого или подраздела)
+        short_description:
+          type: string
+          minLength: 1
+        content:
+          type: string
+          minLength: 1
+        tags:
+          type: array
+          nullable: true
+          description: Повторы и пустые после `trim` значения удаляются при сохранении.
+          items:
+            type: string
+            maxLength: 100
+        preview_image:
+          type: string
+          format: binary
+          nullable: true
+          description: Файл, проходящий Laravel-правило `image`; максимум 4096 КБ.
+
+    StoreArticleRequestJson:
+      type: object
+      required: [title, section_id, short_description, content]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+        section_id:
+          type: integer
+          format: int64
+          minimum: 1
+        short_description:
+          type: string
+          minLength: 1
+        content:
+          type: string
+          minLength: 1
+        tags:
+          type: array
+          nullable: true
+          description: Повторы и пустые после `trim` значения удаляются при сохранении.
+          items:
+            type: string
+            maxLength: 100
+
+    UpdateArticleRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+        section_id:
+          type: integer
+          format: int64
+          minimum: 1
+        short_description:
+          type: string
+          minLength: 1
+        content:
+          type: string
+          minLength: 1
+        tags:
+          type: array
+          nullable: true
+          description: Если поле передано массивом, оно полностью заменяет текущие теги.
+          items:
+            type: string
+            maxLength: 100
+        preview_image:
+          type: string
+          format: binary
+          nullable: true
+          description: Новое preview-изображение (заменяет предыдущее)
+
+    UpdateArticleRequestJson:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+        section_id:
+          type: integer
+          format: int64
+          minimum: 1
+        short_description:
+          type: string
+          minLength: 1
+        content:
+          type: string
+          minLength: 1
+        tags:
+          type: array
+          nullable: true
+          description: Если поле передано массивом, оно полностью заменяет текущие теги.
+          items:
+            type: string
+            maxLength: 100
+
+    CommentReply:
+      type: object
+      required: [id, body, author, parent_id, created_at, updated_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        body:
+          type: string
+        author:
+          $ref: '#/components/schemas/Author'
+        parent_id:
+          type: integer
+          format: int64
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    Comment:
+      type: object
+      required: [id, body, author, created_at, updated_at, replies]
+      properties:
+        id:
+          type: integer
+          format: int64
+        body:
+          type: string
+        author:
+          $ref: '#/components/schemas/Author'
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+        replies:
+          type: array
+          items:
+            $ref: '#/components/schemas/CommentReply'
+
+    CommentsListResponse:
+      type: object
+      required: [comments]
+      properties:
+        comments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Comment'
+
+    StoreCommentRequest:
+      type: object
+      required: [body]
+      properties:
+        body:
+          type: string
+          minLength: 1
+          maxLength: 10000
+
+    UpdateCommentRequest:
+      type: object
+      required: [body]
+      properties:
+        body:
+          type: string
+          minLength: 1
+          maxLength: 10000
+
+    CommentCreatedResponse:
+      type: object
+      required: [id, created_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    CommentReplyCreatedResponse:
+      type: object
+      required: [id, parent_id, created_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        parent_id:
+          type: integer
+          format: int64
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    CommentUpdatedResponse:
+      type: object
+      required: [comment]
+      properties:
+        comment:
+          type: object
+          required: [id, body, updated_at]
+          properties:
+            id:
+              type: integer
+              format: int64
+            body:
+              type: string
+            updated_at:
+              type: string
+              format: date-time
+              nullable: true

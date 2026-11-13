@@ -1,0 +1,23 @@
+{
+    "name": "FormValidation",
+    "title": "Form Validation",
+    "authors": [
+        {
+            "name": "Sergey Chernyi",
+            "email": "2@sergeyy.ru",
+            "role": "Developer"
+        }
+    ],
+    "alias": "formvalidation",
+    "description": "Form Validation Module",
+    "version": "0.1.0",
+    "minimumCoreVersion": "0.1.0",
+    "keywords": [],
+    "priority": 0,
+    "providers": [
+        "Modules\\FormValidation\\Providers\\FormValidationServiceProvider"
+    ],
+    "aliases": {},
+    "files": [],
+    "requires": []
+}

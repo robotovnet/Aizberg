@@ -1,0 +1,13 @@
+{
+    "name": "YandexWordstat",
+    "alias": "yandex-wordstat",
+    "description": "",
+    "keywords": [],
+    "priority": 0,
+    "providers": [
+        "Modules\\YandexWordstat\\Providers\\YandexWordstatServiceProvider"
+    ],
+    "aliases": {},
+    "files": [],
+    "requires": []
+}

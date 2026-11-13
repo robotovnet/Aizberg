@@ -1,0 +1,13 @@
+{
+    "name": "ImageUploader",
+    "alias": "imageuploader",
+    "description": "Каталог изображений с загрузкой и управлением.",
+    "keywords": [],
+    "priority": 0,
+    "providers": [
+        "Modules\\ImageUploader\\Providers\\ImageUploaderServiceProvider"
+    ],
+    "aliases": {},
+    "files": [],
+    "requires": []
+}

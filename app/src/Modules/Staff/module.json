@@ -1,0 +1,23 @@
+{
+    "name": "Staff",
+    "title": "Staff",
+    "authors": [
+        {
+            "name": "Sergey Chernyi",
+            "email": "2@sergeyy.ru",
+            "role": "Developer"
+        }
+    ],
+    "alias": "staff",
+    "description": "Staff Module",
+    "version": "0.1.0",
+    "minimumCoreVersion": "0.1.0",
+    "keywords": [],
+    "priority": 0,
+    "providers": [
+        "Modules\\Staff\\Providers\\StaffServiceProvider"
+    ],
+    "aliases": {},
+    "files": [],
+    "requires": ["Client"]
+}

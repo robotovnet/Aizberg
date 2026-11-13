@@ -1,0 +1,23 @@
+{
+    "name": "ApiDocumentation",
+    "title": "API Documentation",
+    "authors": [
+        {
+            "name": "Sergey Chernyi",
+            "email": "2@sergeyy.ru",
+            "role": "Developer"
+        }
+    ],
+    "description": "API для создания, публикации и поиска мультиязычной документации",
+    "alias": "apidocumentation",
+    "version": "0.1.0",
+    "minimumCoreVersion": "0.1.0",
+    "keywords": ["api", "documentation"],
+    "priority": 0,
+    "providers": [
+        "Modules\\ApiDocumentation\\Providers\\ApiDocumentationServiceProvider"
+    ],
+    "aliases": {},
+    "files": [],
+    "requires": ["Client"]
+}

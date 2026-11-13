@@ -1,0 +1,74 @@
+source products
+{
+    type            = mysql
+
+    sql_host        = ${SPHINX_DB_HOST}
+    sql_user        = ${SPHINX_DB_USER}
+    sql_pass        = ${SPHINX_DB_PASSWORD}
+    sql_db          = ${SPHINX_DB_NAME}
+    sql_port        = ${SPHINX_DB_PORT}
+
+    sql_query_pre = SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci
+
+    sql_query              = \
+        SELECT products.id as pid, products.vendor_code, vendor_code2, sphinx_data.fullname as product_name, \
+            products.overview_text as product_desc, brands.name as brand_name, sphinx_data.name as short_name, \
+            plural_name as product_group_name, sphinx_data.alt_names as alt_names, sphinx_data.pn as pn, \
+            products.is_hidden as is_hidden, products.not_for_everyone as not_for_everyone \
+        FROM products \
+        LEFT JOIN brands ON brands.id = products.brand_id \
+        LEFT JOIN product_groups ON product_group_id = product_groups.id \
+        INNER JOIN sphinx_data ON sphinx_data.vendor_code = products.vendor_code \
+        WHERE products.id>=$start AND products.id<=$end AND products.deleted_at IS NULL
+
+    sql_query_range        = SELECT MIN(id), MAX(id) FROM products
+    sql_range_step         = 5000
+
+    sql_ranged_throttle = 500
+}
+
+index tovar
+{
+    source = products
+    morphology = stem_enru
+
+    type              = plain
+    rt_mem_limit      = 256M
+    #blend_mode       = trim_head, trim_tail
+    blend_chars       = +, &, U+23, -, .
+    min_prefix_len    = 1
+    min_infix_len     = 2
+    min_word_len      = 1
+    min_stemming_len  = 1
+
+    index_exact_words = 1
+    expand_keywords   = 1
+    index_field_lengths = 1
+
+    html_strip = 1
+
+    field_string = product_name, short_name, vendor_code, vendor_code2, product_desc, brand_name, product_group_name, alt_names, pn, is_hidden, not_for_everyone
+}
+
+common {
+    datadir = /opt/sphinx/data
+}
+
+indexer
+{
+    mem_limit       = 256M
+}
+
+searchd
+{
+    listen          = 9312
+    listen          = 9306:mysql41
+    read_timeout    = 5
+    max_children    = 30
+    pid_file        = /opt/sphinx/data/searchd.pid
+    seamless_rotate = 1
+    preopen_indexes = 1
+    unlink_old      = 1
+    workers         = thread_pool
+}
+

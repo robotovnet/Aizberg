@@ -1,0 +1,23 @@
+{
+    "name": "Blogs",
+    "title": "Blogs",
+    "authors": [
+        {
+            "name": "Sergey Chernyi",
+            "email": "2@sergeyy.ru",
+            "role": "Developer"
+        }
+    ],
+    "description": "API блога: статьи, разделы, комментарии",
+    "alias": "blogs",
+    "version": "0.1.0",
+    "minimumCoreVersion": "0.1.0",
+    "keywords": [],
+    "priority": 0,
+    "providers": [
+        "Modules\\Blogs\\Providers\\BlogsServiceProvider"
+    ],
+    "aliases": {},
+    "files": [],
+    "requires": ["Client"]
+}

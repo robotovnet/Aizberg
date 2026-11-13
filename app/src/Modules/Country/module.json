@@ -1,0 +1,23 @@
+{
+    "name": "Country",
+    "title": "Country",
+    "authors": [
+        {
+            "name": "Sergey Chernyi",
+            "email": "2@sergeyy.ru",
+            "role": "Developer"
+        }
+    ],
+    "alias": "country",
+    "description": "Country Module",
+    "version": "0.1.0",
+    "minimumCoreVersion": "0.1.0",
+    "keywords": [],
+    "priority": 0,
+    "providers": [
+        "Modules\\Country\\Providers\\CountryServiceProvider"
+    ],
+    "aliases": {},
+    "files": [],
+    "requires": ["Settings", "Client"]
+}

@@ -1,0 +1,13 @@
+{
+    "name": "Forms",
+    "alias": "forms",
+    "description": "Публичные формы сайта (обратная связь и т.п.) с отправкой на email",
+    "keywords": [],
+    "priority": 0,
+    "providers": [
+        "Modules\\Forms\\Providers\\FormsServiceProvider"
+    ],
+    "aliases": {},
+    "files": [],
+    "requires": []
+}

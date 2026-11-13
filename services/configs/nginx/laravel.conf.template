@@ -1,0 +1,27 @@
+server {
+    listen         80;
+    listen    [::]:80;
+
+    server_name ${WEBSERVER_HOST} www.${WEBSERVER_HOST} ${SHOP_HOSTS} ${API_HOST};
+
+    server_tokens off;
+
+    auth_basic ${BASIC_AUTH_ENABLED};
+    auth_basic_user_file /etc/ngnix/.htpasswd;
+
+    #if ($host ~ ^www\.(?<domain>.+)$) {
+    #    return 301 https://$domain$request_uri;
+    #}
+
+    #return 301 https://$host$request_uri;
+}
+
+server {
+    listen         80;
+    listen    [::]:80;
+
+    server_name ${REDIRECT_HOST};
+    server_tokens off;
+
+    #return 301 https://${WEBSERVER_HOST};
+}

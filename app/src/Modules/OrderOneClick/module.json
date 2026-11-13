@@ -1,0 +1,13 @@
+{
+    "name": "OrderOneClick",
+    "alias": "orderoneclick",
+    "description": "",
+    "keywords": [],
+    "priority": 0,
+    "providers": [
+        "Modules\\OrderOneClick\\Providers\\OrderOneClickServiceProvider"
+    ],
+    "aliases": {},
+    "files": [],
+    "requires": []
+}

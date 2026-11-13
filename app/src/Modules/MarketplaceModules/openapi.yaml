@@ -1,0 +1,1756 @@
+openapi: 3.0.3
+
+info:
+  title: Aizberg Marketplace Modules API
+  version: 1.4.0
+  description: |
+    REST API модуля **MarketplaceModules**: публичный каталог модулей,
+    управление собственными модулями продавца, вопросы и ответы, отзывы,
+    пользовательские оценки, личное избранное, история версий и блокировка
+    модулей модераторами.
+
+    Все маршруты имеют базовый префикс `/api/marketplace-modules`.
+
+    Защищённые операции используют активную сессию клиента Laravel
+    (`web` + `api` + `auth:client`). Для получения JSON-ответа при отсутствии
+    авторизации следует отправлять `Accept: application/json`, иначе middleware
+    может перенаправить клиента на страницу входа. Маршруты модуля исключены из
+    CSRF-проверки, поэтому CSRF-токен не требуется.
+
+    Успешные операции возвращают HTTP 200 и JSON непосредственно с данными, без
+    обёртки `success` или `data`. Ошибки бизнес-логики возвращают HTTP 400,
+    ошибки валидации FormRequest — HTTP 422. Просмотр отсутствующего модуля через
+    `GET /modules/{slug}` является отдельным случаем и возвращает HTTP 404.
+    Все маршруты ограничены общим API rate limiter: 60 запросов в минуту на
+    авторизованного пользователя или IP; при превышении возвращается HTTP 429.
+
+    Архивированные и заблокированные модули исключаются из всех публичных
+    операций. Карточка такого модуля возвращает HTTP 404, а списки вопросов,
+    отзывов и версий — пустой результат. Создание нового пользовательского
+    контента для скрытого модуля запрещено.
+
+servers:
+  - url: /api/marketplace-modules
+    description: Относительный URL API MarketplaceModules
+
+tags:
+  - name: Catalog
+    description: Публичный каталог и карточки модулей
+  - name: Seller modules
+    description: Управление модулями текущего авторизованного клиента
+  - name: Questions
+    description: Вопросы о модуле и ответы на них
+  - name: Reviews
+    description: Отзывы клиентов
+  - name: Ratings
+    description: Пользовательские оценки от 1 до 5
+  - name: Favorites
+    description: Личный список избранных модулей текущего клиента
+  - name: Moderation
+    description: Блокировка модулей клиентами с отдельным правом модератора
+
+paths:
+  /search:
+    get:
+      tags: [Catalog]
+      summary: Найти модули
+      description: |
+        Ищет SQL-оператором `LIKE` в названии, install slug, кратком и подробном
+        описаниях, имени автора и тегах (чувствительность к регистру определяется
+        collation базы данных). Архивированные и заблокированные модули
+        исключаются. Пустой `q` возвращает все публично доступные модули.
+        Необязательные фильтры `category`, `license_type` и `pricing_type`
+        применяются совместно с поисковой строкой (AND); пустые значения
+        фильтров игнорируются.
+        Сортировка работает так же, как в `/categories/{category}`; по умолчанию
+        от новых к старым (`sort=date_added&order=desc`). Размер страницы — 18.
+      operationId: marketplaceModulesSearch
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: Поисковая строка. По умолчанию используется пустая строка.
+          schema:
+            type: string
+            default: ''
+          example: seo
+        - name: category
+          in: query
+          required: false
+          description: Название категории; точное сравнение без учёта регистра. Пробелы по краям удаляются.
+          schema:
+            type: string
+          example: SEO
+        - name: license_type
+          in: query
+          required: false
+          description: Тип лицензии; точное сравнение с учётом collation базы данных. Пробелы по краям удаляются.
+          schema:
+            $ref: '#/components/schemas/LicenseType'
+          example: MIT
+        - name: pricing_type
+          in: query
+          required: false
+          description: |
+            Тип оплаты: `free` — бесплатный, `free_trial` — с пробным периодом,
+            `paid` — платный. Пробелы по краям удаляются.
+          schema:
+            type: string
+            enum: [free, free_trial, paid]
+          example: free
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Sort'
+        - $ref: '#/components/parameters/Order'
+      responses:
+        '200':
+          description: Страница найденных модулей
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SortedModuleListPage'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /featured:
+    get:
+      tags: [Catalog]
+      summary: Получить подборки модулей
+      description: |
+        Возвращает до 10 модулей в каждой подборке: популярные сортируются по
+        числу просмотров, избранные выбираются случайно среди `is_favorite=true`,
+        новые сортируются по дате создания. Архивные и заблокированные модули
+        не включаются.
+      operationId: marketplaceModulesFeatured
+      responses:
+        '200':
+          description: Популярные, избранные и новые модули
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeaturedResponse'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /categories:
+    get:
+      tags: [Catalog]
+      summary: Получить список категорий
+      description: Возвращает уникальные непустые категории публичных модулей в алфавитном порядке.
+      operationId: marketplaceModulesCategories
+      responses:
+        '200':
+          description: Список категорий
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: string
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /categories/{category}:
+    get:
+      tags: [Catalog]
+      summary: Получить модули категории
+      description: |
+        Категория сравнивается без учёта регистра после URL-декодирования.
+        Архивированные и заблокированные модули исключаются. Размер страницы — 18.
+
+        Поддерживаемые значения `sort`: `popularity`, `rating`, `date_added`,
+        `date_updated`, `name`, `pricing`. Любое другое значение фактически
+        сортирует по `date_added`, но в ответе возвращается исходное значение.
+        Для `order` только значение `asc` без учёта регистра включает сортировку
+        по возрастанию; любое другое значение означает `desc` и также отражается
+        в ответе без нормализации.
+      operationId: marketplaceModulesByCategory
+      parameters:
+        - $ref: '#/components/parameters/Category'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Sort'
+        - $ref: '#/components/parameters/Order'
+      responses:
+        '200':
+          description: Страница модулей категории
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategoryModuleListPage'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /modules/{slug}:
+    get:
+      tags: [Catalog]
+      summary: Получить полную карточку модуля
+      description: |
+        Возвращает публично доступный модуль по точному `install_slug` и
+        увеличивает `views_count` на единицу до формирования ответа.
+        Архивированный или заблокированный модуль считается отсутствующим.
+      operationId: marketplaceModulesShow
+      parameters:
+        - $ref: '#/components/parameters/ModuleSlug'
+      responses:
+        '200':
+          description: Полная карточка модуля
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModuleCard'
+        '404':
+          $ref: '#/components/responses/ModuleNotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /favorites:
+    get:
+      tags: [Favorites]
+      summary: Получить избранные модули
+      description: |
+        Возвращает личный список текущего авторизованного клиента, начиная с
+        добавленных последними. Архивированные и заблокированные модули в список
+        не включаются. Размер страницы — 18.
+      operationId: marketplaceModulesListFavorites
+      security:
+        - clientSession: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: Страница избранных модулей
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModuleListPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /modules/{slug}/favorite:
+    parameters:
+      - $ref: '#/components/parameters/ModuleSlug'
+
+    post:
+      tags: [Favorites]
+      summary: Добавить модуль в избранное
+      description: |
+        Идемпотентно добавляет публично доступный модуль в личное избранное
+        текущего клиента. Для неизвестного, архивированного или заблокированного
+        модуля возвращается HTTP 400.
+      operationId: marketplaceModulesAddFavorite
+      security:
+        - clientSession: []
+      responses:
+        '200':
+          description: Модуль находится в избранном
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FavoriteStateResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+    delete:
+      tags: [Favorites]
+      summary: Удалить модуль из избранного
+      description: |
+        Идемпотентно удаляет модуль из личного избранного текущего клиента.
+        Удаление доступно и для архивированного или заблокированного модуля,
+        чтобы клиент мог очистить ранее созданную связь.
+      operationId: marketplaceModulesRemoveFavorite
+      security:
+        - clientSession: []
+      responses:
+        '200':
+          description: Модуль отсутствует в избранном
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FavoriteStateResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /modules/{slug}/questions:
+    parameters:
+      - $ref: '#/components/parameters/ModuleSlug'
+
+    get:
+      tags: [Questions]
+      summary: Получить вопросы и ответы
+      description: |
+        Вопросы сортируются от новых к старым, ответы — от старых к новым.
+        Размер страницы — 10. Для неизвестного, архивированного или
+        заблокированного модуля возвращается пустая страница с HTTP 200.
+      operationId: marketplaceModulesListQuestions
+      parameters:
+        - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: Страница вопросов с ответами
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuestionsPage'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+    post:
+      tags: [Questions]
+      summary: Задать вопрос о модуле
+      description: |
+        Создаёт вопрос от имени текущего авторизованного клиента. Для
+        архивированного или заблокированного модуля возвращается HTTP 400.
+      operationId: marketplaceModulesAskQuestion
+      security:
+        - clientSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AskQuestionRequest'
+      responses:
+        '200':
+          description: Вопрос создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatedEntityResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /questions/{questionId}/answers:
+    post:
+      tags: [Questions]
+      summary: Ответить на вопрос
+      description: |
+        Создаёт ответ от имени текущего авторизованного клиента. Вопросы
+        архивированных и заблокированных модулей считаются недоступными.
+      operationId: marketplaceModulesAnswerQuestion
+      security:
+        - clientSession: []
+      parameters:
+        - $ref: '#/components/parameters/QuestionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnswerQuestionRequest'
+      responses:
+        '200':
+          description: Ответ создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatedEntityResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /modules/{slug}/reviews:
+    parameters:
+      - $ref: '#/components/parameters/ModuleSlug'
+
+    get:
+      tags: [Reviews]
+      summary: Получить отзывы
+      description: |
+        Отзывы сортируются по времени последнего обновления от новых к старым,
+        размер страницы — 10. `author_rating` содержит текущую оценку автора
+        отзыва для этого модуля либо `null`. Для неизвестного slug возвращается
+        пустая страница с HTTP 200. То же поведение используется для
+        архивированного или заблокированного модуля.
+      operationId: marketplaceModulesListReviews
+      parameters:
+        - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: Страница отзывов
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewsPage'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+    post:
+      tags: [Reviews]
+      summary: Создать или дополнить отзыв
+      description: |
+        Для пары модуль-клиент хранится одна запись. Первый запрос создаёт отзыв,
+        последующие не заменяют его, а дописывают новый текст в конец вместе с
+        серверной временной меткой. Для архивированного или заблокированного
+        модуля возвращается HTTP 400.
+      operationId: marketplaceModulesUpsertReview
+      security:
+        - clientSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StoreReviewRequest'
+      responses:
+        '200':
+          description: Отзыв создан или дополнен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewSavedResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /modules/{slug}/ratings:
+    post:
+      tags: [Ratings]
+      summary: Поставить оценку модулю
+      description: |
+        Создаёт оценку текущего клиента или заменяет значение ранее поставленной
+        оценки от 1 до 5, после чего пересчитывает среднее арифметическое.
+        Среднее округляется до двух знаков. Для пары клиент-модуль
+        всегда хранится ровно одна запись: повторный запрос обновляет её, а не
+        добавляет новую строку. Архивированные и заблокированные модули не
+        принимают оценки.
+      operationId: marketplaceModulesRate
+      security:
+        - clientSession: []
+      parameters:
+        - $ref: '#/components/parameters/ModuleSlug'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StoreRatingRequest'
+      responses:
+        '200':
+          description: Оценка сохранена и агрегат пересчитан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RatingSavedResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /modules/{slug}/versions:
+    get:
+      tags: [Catalog]
+      summary: Получить историю версий
+      description: |
+        Версии сортируются по дате выпуска от новых к старым. Новая запись
+        версии добавляется при создании модуля и при обновлении с новым значением
+        `version`. Для неизвестного, архивированного или заблокированного модуля
+        возвращается `{"items": []}` с HTTP 200.
+      operationId: marketplaceModulesVersions
+      parameters:
+        - $ref: '#/components/parameters/ModuleSlug'
+      responses:
+        '200':
+          description: История версий
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VersionsResponse'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /modules/{slug}/reviews/{reviewId}/helpfulness:
+    post:
+      tags: [Reviews]
+      summary: Пометить отзыв полезным или неполезным
+      operationId: marketplaceModulesMarkReviewHelpfulness
+      security:
+        - clientSession: []
+      parameters:
+        - $ref: '#/components/parameters/ModuleSlug'
+        - $ref: '#/components/parameters/ReviewId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StoreReviewHelpfulnessRequest'
+      responses:
+        '200':
+          description: Голос сохранён, счётчики пересчитаны
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewHelpfulnessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /:
+    post:
+      tags: [Seller modules]
+      summary: Создать модуль
+      description: |
+        Создаёт модуль от имени текущего клиента, синхронизирует теги и создаёт
+        первую запись истории версий. Для загрузки `icon` и массива
+        `screenshots[]` используется `multipart/form-data`; без файлов можно
+        передать JSON. Галерея может содержать не более 10 изображений.
+      operationId: marketplaceModulesCreate
+      security:
+        - clientSession: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/StoreModuleMultipartRequest'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StoreModuleJsonRequest'
+      responses:
+        '200':
+          description: Модуль создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModuleCreatedResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /{id}:
+    parameters:
+      - $ref: '#/components/parameters/ModuleId'
+
+    patch:
+      tags: [Seller modules]
+      summary: Обновить собственный модуль
+      description: |
+        Доступно только владельцу. Несмотря на HTTP-метод PATCH, текущий
+        FormRequest требует повторно передать все основные поля, `version` и
+        `version_release_date`; необязательны только URL лицензии/changelog,
+        теги, подробное описание, иконка и скриншоты. Если передана новая иконка,
+        старая удаляется. Каждый файл из `screenshots[]` добавляется в конец
+        существующей галереи; ранее загруженные файлы сохраняются. Если поле
+        отсутствует или передан пустой массив, галерея не изменяется. Общее
+        количество скриншотов после добавления не может превышать 10. Если
+        `version` ещё не встречалась, создаётся запись истории.
+        Если не передать `license_url` или `changelog_url`, соответствующее поле
+        станет `null`; если не передать `tags`, все существующие теги удалятся.
+        Отсутствующие `detailed_description` и `icon` сохраняют прежние значения.
+      operationId: marketplaceModulesUpdate
+      security:
+        - clientSession: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/StoreModuleMultipartRequest'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StoreModuleJsonRequest'
+      responses:
+        '200':
+          description: Модуль обновлён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModuleUpdatedResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+    delete:
+      tags: [Seller modules]
+      summary: Удалить собственный модуль
+      description: |
+        Выполняет мягкое удаление модуля и удаляет его иконку и скриншоты из хранилища.
+        Связанные данные остаются в базе до физического удаления родительской
+        записи. Доступно только владельцу.
+      operationId: marketplaceModulesDelete
+      security:
+        - clientSession: []
+      responses:
+        '200':
+          description: Модуль удалён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /{id}/screenshots/{screenshotId}:
+    delete:
+      tags: [Seller modules]
+      summary: Удалить скриншот модуля
+      description: |
+        Удаляет конкретный скриншот из галереи и локального хранилища.
+        Операция доступна только владельцу модуля. `screenshotId` можно получить
+        из массива `screenshots` полной карточки модуля. После удаления позиции
+        оставшихся файлов пересчитываются с нуля без изменения их порядка.
+      operationId: marketplaceModulesDeleteScreenshot
+      security:
+        - clientSession: []
+      parameters:
+        - $ref: '#/components/parameters/ModuleId'
+        - $ref: '#/components/parameters/ScreenshotId'
+      responses:
+        '200':
+          description: Скриншот удалён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /{id}/changelog:
+    post:
+      tags: [Seller modules]
+      summary: Создать или обновить changelog версии
+      description: Доступно владельцу модуля. Повторная версия обновляет существующую запись.
+      operationId: marketplaceModulesStoreChangelog
+      security:
+        - clientSession: []
+      parameters:
+        - $ref: '#/components/parameters/ModuleId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StoreModuleChangelogRequest'
+      responses:
+        '200':
+          description: Changelog сохранён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Version'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /{id}/archive:
+    post:
+      tags: [Seller modules]
+      summary: Архивировать собственный модуль
+      description: |
+        Устанавливает `is_archived=true`. Операции восстановления из архива в
+        данном модуле нет. Доступно только владельцу.
+      operationId: marketplaceModulesArchive
+      security:
+        - clientSession: []
+      parameters:
+        - $ref: '#/components/parameters/ModuleId'
+      responses:
+        '200':
+          description: Модуль архивирован
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArchiveResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /moderation/modules/{id}/block:
+    post:
+      tags: [Moderation]
+      summary: Заблокировать модуль
+      description: |
+        Устанавливает `is_blocked=true`, время блокировки и ID текущего
+        модератора. Доступно только клиенту, чей `client_id` присутствует в
+        таблице `marketplace_module_moderator_permissions`. Повторная блокировка
+        идемпотентна и сохраняет сведения о первоначальной блокировке.
+        Заблокированный модуль немедленно исключается из всех публичных API.
+      operationId: marketplaceModulesBlock
+      security:
+        - clientSession: []
+      parameters:
+        - $ref: '#/components/parameters/ModuleId'
+      responses:
+        '200':
+          description: Модуль заблокирован
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModuleUpdatedResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /moderation/modules/{id}/unblock:
+    post:
+      tags: [Moderation]
+      summary: Разблокировать модуль
+      description: |
+        Снимает блокировку и очищает `blocked_at` и `blocked_by_client_id`.
+        Доступно только клиенту из таблицы
+        `marketplace_module_moderator_permissions`. Повторная разблокировка
+        идемпотентна. Архивированный модуль после разблокировки остаётся скрытым.
+      operationId: marketplaceModulesUnblock
+      security:
+        - clientSession: []
+      parameters:
+        - $ref: '#/components/parameters/ModuleId'
+      responses:
+        '200':
+          description: Блокировка модуля снята
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModuleUpdatedResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+components:
+  securitySchemes:
+    clientSession:
+      type: apiKey
+      in: cookie
+      name: texnocentr_magazin_elektroniki_session
+      description: |
+        Cookie активной Laravel-сессии клиента для guard `client`. Фактическое
+        имя определяется настройкой `SESSION_COOKIE`; указанное имя используется
+        в рабочем окружении проекта. CSRF-токен для маршрутов MarketplaceModules
+        не требуется.
+
+  parameters:
+    Sort:
+      name: sort
+      in: query
+      required: false
+      description: |
+        Поле сортировки: `popularity` — просмотры, `rating` — рейтинг
+        (модули без рейтинга всегда в конце), `date_added` — дата создания,
+        `date_updated` — дата изменения, `name` — название, `pricing` — тип
+        оплаты (`pricing_type`, строка, не числовая цена).
+        Неизвестное значение означает `date_added`. При равенстве значений
+        используется ID по возрастанию. В ответе возвращается исходный `sort`.
+      schema:
+        type: string
+        default: date_added
+      example: rating
+
+    Order:
+      name: order
+      in: query
+      required: false
+      description: |
+        Направление сортировки: `asc` — по возрастанию, `desc` — по убыванию.
+        Только `asc` без учёта регистра означает возрастание, остальные значения
+        означают убывание. В ответе возвращается исходный `order`.
+      schema:
+        type: string
+        default: desc
+      example: desc
+
+    Page:
+      name: page
+      in: query
+      required: false
+      description: |
+        Номер страницы. Значение приводится к integer и ограничивается снизу
+        единицей; отсутствующее, нечисловое, нулевое или отрицательное значение
+        фактически становится 1.
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+
+    ModuleId:
+      name: id
+      in: path
+      required: true
+      description: Числовой ID модуля. Маршрут принимает только цифры.
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+
+    QuestionId:
+      name: questionId
+      in: path
+      required: true
+      description: Числовой ID вопроса. Маршрут принимает только цифры.
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+
+    ReviewId:
+      name: reviewId
+      in: path
+      required: true
+      description: Числовой ID отзыва.
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+
+    ScreenshotId:
+      name: screenshotId
+      in: path
+      required: true
+      description: ID скриншота из массива `screenshots` полной карточки модуля.
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+
+    ModuleSlug:
+      name: slug
+      in: path
+      required: true
+      description: Точный `install_slug` модуля.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 255
+        pattern: '^[a-zA-Z0-9_-]+$'
+      example: seo-tools
+
+    Category:
+      name: category
+      in: path
+      required: true
+      description: URL-encoded название категории; сравнение без учёта регистра.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 30
+      example: SEO
+
+  responses:
+    BadRequest:
+      description: Ошибка бизнес-логики
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/MessageResponse'
+          examples:
+            moduleNotFoundOrForbidden:
+              value:
+                message: Модуль не найден или нет прав.
+            moduleNotFound:
+              value:
+                message: Модуль не найден.
+            questionNotFound:
+              value:
+                message: Вопрос не найден.
+            screenshotNotFound:
+              value:
+                message: Скриншот не найден.
+            moderatorForbidden:
+              value:
+                message: Нет прав модератора.
+
+    ModuleNotFound:
+      description: Модуль не найден, архивирован или заблокирован
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/MessageResponse'
+          example:
+            message: Module not found.
+
+    Unauthorized:
+      description: Клиент не авторизован
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/MessageResponse'
+          example:
+            message: Unauthenticated.
+
+    ValidationError:
+      description: Ошибка валидации Laravel FormRequest
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ValidationErrorResponse'
+
+    TooManyRequests:
+      description: Превышен лимит 60 API-запросов в минуту
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/MessageResponse'
+          example:
+            message: Too Many Attempts.
+
+  schemas:
+    MessageResponse:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+
+    SuccessResponse:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          enum: [success]
+          example: success
+
+    ValidationErrorResponse:
+      type: object
+      required: [message, errors]
+      properties:
+        message:
+          type: string
+          example: The given data was invalid.
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+          example:
+            display_name:
+              - The display name field is required.
+
+    PricingType:
+      type: string
+      enum: [free, free_trial, paid]
+      description: "`free` — бесплатно; `free_trial` — модуль с пробным периодом; `paid` — платный модуль."
+
+    LicenseType:
+      type: string
+      enum:
+        - MIT
+        - Other
+        - GPLv2
+        - Apache 2.0
+        - GPLv3
+        - BSD 3-Clause
+        - Unlicense
+        - BSD 2-Clause
+        - LGPLv3
+        - AGPLv3
+
+    RatingValue:
+      type: integer
+      minimum: 1
+      maximum: 5
+
+    ModuleListItem:
+      type: object
+      required:
+        - display_name
+        - icon_url
+        - aggregate_rating
+        - author_display_name
+        - pricing_type
+        - short_description
+        - views_count
+        - website_url
+        - install_slug
+      properties:
+        display_name:
+          type: string
+          maxLength: 255
+          example: SEO Tools
+        icon_url:
+          type: string
+          nullable: true
+          example: /storage/marketplace-modules/icons/seo-tools.png
+        aggregate_rating:
+          type: number
+          format: float
+          minimum: 1
+          maximum: 5
+          nullable: true
+          example: 4.33
+        author_display_name:
+          type: string
+          maxLength: 255
+          example: Example Studio
+        pricing_type:
+          $ref: '#/components/schemas/PricingType'
+        price:
+          type: number
+          format: double
+          minimum: 0.01
+          maximum: 9999999999.99
+          description: Присутствует только для `pricing_type=paid`.
+          example: 1490.00
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          pattern: '^[A-Z]{3}$'
+          description: Трёхбуквенный код валюты; присутствует только для `pricing_type=paid`.
+          example: RUB
+        short_description:
+          type: string
+          example: Инструменты метаданных и sitemap для Aizberg.
+        views_count:
+          type: integer
+          minimum: 0
+          example: 1842
+        website_url:
+          type: string
+          format: uri
+          maxLength: 1024
+          example: https://example.com/seo-tools
+        install_slug:
+          type: string
+          maxLength: 255
+          pattern: '^[a-zA-Z0-9_-]+$'
+          example: seo-tools
+
+    ModuleScreenshot:
+      type: object
+      required: [id, url, position]
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Идентификатор для удаления конкретного файла из галереи.
+        url:
+          type: string
+          format: uri
+          description: Публичный URL файла.
+        position:
+          type: integer
+          minimum: 0
+          maximum: 9
+          description: Позиция скриншота в галерее, начиная с нуля.
+
+    ModuleCard:
+      type: object
+      required:
+        - id
+        - display_name
+        - install_slug
+        - website_url
+        - source_code_url
+        - license_type
+        - license_url
+        - changelog_url
+        - pricing_type
+        - author_display_name
+        - short_description
+        - category
+        - tags
+        - detailed_description
+        - icon_url
+        - screenshots
+        - catalog_release_at
+        - updated_at
+        - ratings_count
+        - aggregate_rating
+        - views_count
+        - is_archived
+        - is_blocked
+        - blocked_at
+        - blocked_by_client_id
+        - owner_client_id
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+        display_name:
+          type: string
+          maxLength: 255
+        install_slug:
+          type: string
+          maxLength: 255
+          pattern: '^[a-zA-Z0-9_-]+$'
+        website_url:
+          type: string
+          format: uri
+          maxLength: 1024
+        source_code_url:
+          type: string
+          maxLength: 1024
+          description: Строка с префиксом HTTP(S) на github.com.
+        license_type:
+          $ref: '#/components/schemas/LicenseType'
+        license_url:
+          type: string
+          maxLength: 1024
+          nullable: true
+          description: Строка с префиксом HTTP(S) на github.com либо `null`.
+        changelog_url:
+          type: string
+          maxLength: 1024
+          nullable: true
+          description: Строка с префиксом HTTP(S) на github.com либо `null`.
+        pricing_type:
+          $ref: '#/components/schemas/PricingType'
+        price:
+          type: number
+          format: double
+          minimum: 0.01
+          maximum: 9999999999.99
+          description: Присутствует только для `pricing_type=paid`.
+          example: 1490.00
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          pattern: '^[A-Z]{3}$'
+          description: Трёхбуквенный код валюты; присутствует только для `pricing_type=paid`.
+          example: RUB
+        author_display_name:
+          type: string
+          maxLength: 255
+        short_description:
+          type: string
+        category:
+          type: string
+          maxLength: 30
+        tags:
+          type: array
+          items:
+            type: string
+            maxLength: 100
+        detailed_description:
+          type: string
+          nullable: true
+        icon_url:
+          type: string
+          nullable: true
+        screenshots:
+          type: array
+          maxItems: 10
+          description: Скриншоты в порядке отображения галереи.
+          items:
+            $ref: '#/components/schemas/ModuleScreenshot'
+        catalog_release_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+        ratings_count:
+          type: integer
+          minimum: 0
+        aggregate_rating:
+          type: number
+          format: float
+          minimum: 1
+          maximum: 5
+          nullable: true
+        views_count:
+          type: integer
+          minimum: 0
+        is_archived:
+          type: boolean
+        is_blocked:
+          type: boolean
+          description: Признак блокировки модератором.
+        blocked_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Время блокировки; `null`, если модуль не заблокирован.
+        blocked_by_client_id:
+          type: integer
+          format: int64
+          minimum: 1
+          nullable: true
+          description: ID заблокировавшего модератора; `null`, если блокировки нет.
+        owner_client_id:
+          type: integer
+          format: int64
+          minimum: 1
+
+    PaginationFields:
+      type: object
+      required: [current_page, last_page, per_page, total]
+      properties:
+        current_page:
+          type: integer
+          minimum: 1
+        last_page:
+          type: integer
+          minimum: 1
+        per_page:
+          type: integer
+          minimum: 1
+        total:
+          type: integer
+          minimum: 0
+
+    ModuleListPage:
+      allOf:
+        - $ref: '#/components/schemas/PaginationFields'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/ModuleListItem'
+
+    CategoryModuleListPage:
+      allOf:
+        - $ref: '#/components/schemas/SortedModuleListPage'
+
+    SortedModuleListPage:
+      allOf:
+        - $ref: '#/components/schemas/ModuleListPage'
+        - type: object
+          required: [sort, order]
+          properties:
+            sort:
+              type: string
+              description: Исходное значение параметра `sort`.
+            order:
+              type: string
+              description: Исходное значение параметра `order`.
+
+    FavoriteStateResponse:
+      type: object
+      required: [is_favorite]
+      properties:
+        is_favorite:
+          type: boolean
+          description: Находится ли модуль в личном избранном текущего клиента.
+
+    FeaturedResponse:
+      type: object
+      required: [popular, featured, recent]
+      properties:
+        popular:
+          type: array
+          maxItems: 10
+          items:
+            $ref: '#/components/schemas/ModuleListItem'
+        featured:
+          type: array
+          maxItems: 10
+          items:
+            $ref: '#/components/schemas/ModuleListItem'
+        recent:
+          type: array
+          maxItems: 10
+          items:
+            $ref: '#/components/schemas/ModuleListItem'
+
+    Answer:
+      type: object
+      required: [id, answer_text, author_client_id, first_name, last_name, avatar_url, created_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        answer_text:
+          type: string
+          maxLength: 20000
+        author_client_id:
+          type: integer
+          format: int64
+        first_name:
+          type: string
+          nullable: true
+        last_name:
+          type: string
+          nullable: true
+        avatar_url:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    Question:
+      type: object
+      required: [id, question_text, author_client_id, first_name, last_name, avatar_url, created_at, answers]
+      properties:
+        id:
+          type: integer
+          format: int64
+        question_text:
+          type: string
+          minLength: 1
+          maxLength: 20000
+        author_client_id:
+          type: integer
+          format: int64
+        first_name:
+          type: string
+          nullable: true
+        last_name:
+          type: string
+          nullable: true
+        avatar_url:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        answers:
+          type: array
+          items:
+            $ref: '#/components/schemas/Answer'
+
+    QuestionsPage:
+      allOf:
+        - $ref: '#/components/schemas/PaginationFields'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/Question'
+
+    Review:
+      type: object
+      required:
+        - id
+        - review_text
+        - author_client_id
+        - created_at
+        - updated_at
+        - author_rating
+        - first_name
+        - last_name
+        - avatar_url
+        - helpful_count
+        - unhelpful_count
+      properties:
+        id:
+          type: integer
+          format: int64
+        review_text:
+          type: string
+        author_client_id:
+          type: integer
+          format: int64
+        first_name:
+          type: string
+          nullable: true
+        last_name:
+          type: string
+          nullable: true
+        avatar_url:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+        author_rating:
+          $ref: '#/components/schemas/RatingValue'
+          nullable: true
+        helpful_count:
+          type: integer
+          minimum: 0
+        unhelpful_count:
+          type: integer
+          minimum: 0
+
+    ReviewsPage:
+      allOf:
+        - $ref: '#/components/schemas/PaginationFields'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/Review'
+
+    Version:
+      type: object
+      required: [version, release_date, changes]
+      properties:
+        version:
+          type: string
+          maxLength: 64
+          example: 1.2.0
+        release_date:
+          type: string
+          format: date-time
+          example: '2026-07-30T12:00:00+00:00'
+        changes:
+          type: array
+          items:
+            type: string
+
+    VersionsResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Version'
+
+    AskQuestionRequest:
+      type: object
+      required: [question_text]
+      properties:
+        question_text:
+          type: string
+          maxLength: 20000
+          example: Поддерживает ли модуль PHP 8.4?
+
+    AnswerQuestionRequest:
+      type: object
+      required: [answer_text]
+      properties:
+        answer_text:
+          type: string
+          minLength: 1
+          maxLength: 20000
+          example: Да, начиная с версии 1.2.0.
+
+    StoreReviewRequest:
+      type: object
+      required: [review_text]
+      properties:
+        review_text:
+          type: string
+          minLength: 1
+          maxLength: 50000
+          example: Удобный модуль, установка прошла без проблем.
+
+    StoreRatingRequest:
+      type: object
+      required: [value]
+      properties:
+        value:
+          $ref: '#/components/schemas/RatingValue'
+
+    StoreReviewHelpfulnessRequest:
+      type: object
+      required: [is_helpful]
+      properties:
+        is_helpful:
+          type: boolean
+
+    ReviewHelpfulnessResponse:
+      type: object
+      required: [review_id, is_helpful, helpful_count, unhelpful_count]
+      properties:
+        review_id:
+          type: integer
+          format: int64
+        is_helpful:
+          type: boolean
+        helpful_count:
+          type: integer
+          minimum: 0
+        unhelpful_count:
+          type: integer
+          minimum: 0
+
+    StoreModuleChangelogRequest:
+      type: object
+      required: [version, changes]
+      properties:
+        version:
+          type: string
+          maxLength: 64
+        changes:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            maxLength: 2000
+        release_date:
+          type: string
+          format: date-time
+          nullable: true
+
+    ModuleRequestFields:
+      type: object
+      required:
+        - display_name
+        - install_slug
+        - website_url
+        - source_code_url
+        - license_type
+        - pricing_type
+        - author_display_name
+        - short_description
+        - category
+        - version
+        - version_release_date
+      oneOf:
+        - description: Платный модуль с обязательной ценой и валютой.
+          required: [price, currency]
+          properties:
+            pricing_type:
+              type: string
+              enum: [paid]
+        - description: Бесплатный модуль или модуль с пробным периодом.
+          properties:
+            pricing_type:
+              type: string
+              enum: [free, free_trial]
+      properties:
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 255
+          example: SEO Tools
+        install_slug:
+          type: string
+          minLength: 1
+          maxLength: 255
+          pattern: '^[a-zA-Z0-9_-]+$'
+          description: Уникален среди всех записей, включая мягко удалённые модули.
+          example: seo-tools
+        website_url:
+          type: string
+          minLength: 1
+          format: uri
+          maxLength: 1024
+          example: https://example.com/seo-tools
+        source_code_url:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          description: HTTP(S)-адрес на github.com; проверка выполняется без учёта регистра.
+          example: https://github.com/example/seo-tools
+        license_type:
+          $ref: '#/components/schemas/LicenseType'
+        license_url:
+          type: string
+          maxLength: 1024
+          nullable: true
+          description: HTTP(S)-адрес на github.com; пустое значение преобразуется в `null`.
+          example: https://github.com/example/seo-tools/blob/main/LICENSE
+        changelog_url:
+          type: string
+          maxLength: 1024
+          nullable: true
+          description: HTTP(S)-адрес на github.com; пустое значение преобразуется в `null`.
+          example: https://github.com/example/seo-tools/blob/main/CHANGELOG.md
+        pricing_type:
+          $ref: '#/components/schemas/PricingType'
+        price:
+          type: number
+          format: double
+          minimum: 0.01
+          maximum: 9999999999.99
+          nullable: true
+          description: Обязательно при `pricing_type=paid`; для остальных типов сохраняется `null`.
+          example: 1490.00
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          pattern: '^[A-Z]{3}$'
+          nullable: true
+          description: Обязательный трёхбуквенный код при `pricing_type=paid`; приводится к верхнему регистру.
+          example: RUB
+        author_display_name:
+          type: string
+          minLength: 1
+          maxLength: 255
+          example: Example Studio
+        short_description:
+          type: string
+          minLength: 1
+          example: Инструменты метаданных и sitemap для Aizberg.
+        category:
+          type: string
+          minLength: 1
+          maxLength: 30
+          example: SEO
+        tags:
+          type: array
+          nullable: true
+          description: Дубликаты удаляются, пробелы по краям обрезаются, пустые теги отбрасываются.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 100
+          example: [seo, sitemap, metadata]
+        version:
+          type: string
+          minLength: 1
+          maxLength: 64
+          example: 1.0.0
+        version_release_date:
+          type: string
+          minLength: 1
+          description: Любая строка даты, принимаемая валидатором Laravel и Carbon.
+          example: '2026-07-30'
+        detailed_description:
+          type: string
+          nullable: true
+          example: Полное описание возможностей и установки модуля.
+
+    StoreModuleJsonRequest:
+      allOf:
+        - $ref: '#/components/schemas/ModuleRequestFields'
+
+    StoreModuleMultipartRequest:
+      allOf:
+        - $ref: '#/components/schemas/ModuleRequestFields'
+        - type: object
+          properties:
+            icon:
+              type: string
+              format: binary
+              nullable: true
+              description: Изображение JPG/PNG/GIF/WebP/SVG размером не более 4096 KiB. Растровые иконки обрезаются по центру и уменьшаются до размера из конфига модуля (по умолчанию 112x112 px).
+            screenshots:
+              type: array
+              maxItems: 10
+              nullable: true
+              description: До 10 файлов JPEG, PNG или WebP, каждый размером не более 10240 KiB.
+              items:
+                type: string
+                format: binary
+
+    CreatedEntityResponse:
+      type: object
+      required: [id, created_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    ReviewSavedResponse:
+      type: object
+      required: [id, updated_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    RatingSavedResponse:
+      type: object
+      required: [rating, module]
+      properties:
+        rating:
+          $ref: '#/components/schemas/RatingValue'
+        module:
+          type: object
+          required: [aggregate_rating, ratings_count]
+          properties:
+            aggregate_rating:
+              type: number
+              format: float
+              minimum: 1
+              maximum: 5
+            ratings_count:
+              type: integer
+              minimum: 1
+
+    ModuleCreatedResponse:
+      type: object
+      required: [id, install_slug, module]
+      properties:
+        id:
+          type: integer
+          format: int64
+        install_slug:
+          type: string
+          maxLength: 255
+        module:
+          $ref: '#/components/schemas/ModuleCard'
+
+    ModuleUpdatedResponse:
+      type: object
+      required: [module]
+      properties:
+        module:
+          $ref: '#/components/schemas/ModuleCard'
+
+    ArchiveResponse:
+      type: object
+      required: [is_archived]
+      properties:
+        is_archived:
+          type: boolean
+          enum: [true]
+          example: true

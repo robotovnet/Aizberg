@@ -1,0 +1,186 @@
+services:
+  # PHP / hub.docker.com/_/php
+  app:
+    build:
+      context: .
+      dockerfile: ./docker/build/php/Dockerfile
+    container_name: app
+    restart: unless-stopped
+    working_dir: /var/www/aizberg
+    environment:
+      APP_NAME: ${APP_NAME}
+      APP_URL: ${APP_URL}
+      API_HOST: ${API_HOST}
+      APP_ENV: ${APP_ENV}
+      APP_DEBUG: ${APP_DEBUG}
+      SESSION_DOMAIN: ${SESSION_DOMAIN}
+      DB_HOST: localhost
+      DB_DATABASE: ${DB_DATABASE}
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      CATALOG_MICRO_PHOTO_WIDTH: ${CATALOG_MICRO_PHOTO_WIDTH}
+      CATALOG_MICRO_PHOTO_HEIGHT: ${CATALOG_MICRO_PHOTO_HEIGHT}
+      CATALOG_MINI_PHOTO_WIDTH: ${CATALOG_MINI_PHOTO_WIDTH}
+      CATALOG_MINI_PHOTO_HEIGHT: ${CATALOG_MINI_PHOTO_HEIGHT}
+      STOREFRONT_URL: ${STOREFRONT_URL:-}
+      STOREFRONT_PREFIX_URL: ${STOREFRONT_PREFIX_URL:-}
+      STOREFRONT_PRODUCT_URL_PATTERN: ${STOREFRONT_PRODUCT_URL_PATTERN:-item/{slug}_{id}.html}
+      STOREFRONT_DEFAULT_CITY: ${STOREFRONT_DEFAULT_CITY:-}
+      STOREFRONT_PHONE_NUMBER: ${STOREFRONT_PHONE_NUMBER:-}
+      MAILGUN_DOMAIN: ${MAILGUN_DOMAIN}
+      MAILGUN_SECRET: ${MAILGUN_SECRET}
+      MAIL_SENDBOX_FROM: ${MAIL_SENDBOX_FROM}
+      MAIL_SENDBOX_REPLY_TO: ${MAIL_SENDBOX_REPLY_TO}
+      MAIL_SENDBOX_API_CLIENT_ID: ${MAIL_SENDBOX_API_CLIENT_ID}
+      MAIL_SENDBOX_API_CLIENT_SECRET: ${MAIL_SENDBOX_API_CLIENT_SECRET}
+      YANDEX_CLOUD_POSTBOX_KEY: ${YANDEX_CLOUD_POSTBOX_KEY}
+      YANDEX_CLOUD_POSTBOX_SECRET: ${YANDEX_CLOUD_POSTBOX_SECRET}
+      RUSENDER_API_KEY: ${RUSENDER_API_KEY}
+      PRONTOSMS_USER: ${PRONTOSMS_USER}
+      PRONTOSMS_SENDER: ${PRONTOSMS_SENDER}
+      PRONTOSMS_PWD: ${PRONTOSMS_PWD}
+      XMLRIVER_USER_ID: ${XMLRIVER_USER_ID}
+      XMLRIVER_API_KEY: ${XMLRIVER_API_KEY}
+    user: "${HOST_USER_ID}:${HOST_GROUP_ID}"
+    command: php-fpm
+    volumes:
+      - ./app/src:/var/www/aizberg
+      - ./services/configs/php/www.conf:/usr/local/etc/php-fpm.d/www.conf
+      - ./services/configs/php/local.ini:/usr/local/etc/php/conf.d/local.ini
+      - ./services/logs/php:/var/log/php
+      - ./services/logs/laravel:/var/www/aizberg/storage/logs
+      - ./services/data/php:/var/lib/php/sessions
+      - ./services/data/mysql_socket:/var/run/mysqld
+    depends_on:
+      - db
+      - queue_server
+      - memcached
+    networks:
+      - app-network
+  # Adminer DB Tool / hub.docker.com/_/adminer
+  adminer:
+    image: adminer:latest
+    container_name: adminer
+    restart: unless-stopped
+    user: "${HOST_USER_ID}:${HOST_GROUP_ID}"
+    #volumes:
+    #  - ./services/data/mysql_socket:/var/run/mysqld
+    environment:
+      ADMINER_DEFAULT_SERVER: db
+    depends_on:
+      - app
+      - db
+    networks:
+      - app-network
+  # Control Panel
+  cp:
+    build:
+      context: /srv/Aizberg-front
+      dockerfile: /srv/Aizberg/docker/build/vue/Dockerfile
+    image: node:current-alpine
+    container_name: cp
+    restart: unless-stopped
+    working_dir: /var/www/html
+    volumes:
+      - ../Aizberg-front/.env:/var/www/html/.env
+    networks:
+      - app-network
+  # Nginx / hub.docker.com/_/nginx
+  webserver:
+    image: nginx:latest
+    container_name: webserver
+    restart: unless-stopped
+    ports:
+      - "${WEBSERVER_PORT}:80"
+      - "${WEBSERVER_PORT_SSL}:8444"
+      - "${CP_PORT}:8443"
+      - "${ADMINER_PORT}:81"
+    environment:
+      REDIRECT_HOST: ${REDIRECT_HOST}
+      WEBSERVER_HOST: ${WEBSERVER_HOST}
+      SHOP_HOSTS: ${SHOP_HOSTS}
+      API_HOST: ${API_HOST}
+      BASIC_AUTH_ENABLED: ${BASIC_AUTH_ENABLED}
+    volumes:
+      - ./app/src:/var/www/aizberg
+      - ./app/src/storage/app/public:/var/www/aizberg/public/storage
+      - ./services/configs/nginx:/etc/nginx/templates
+      - ./services/logs/nginx:/var/log/nginx
+      - ./services/ssl/aizberg_fullchain.pem:/etc/ssl/certs/aizberg_fullchain.pem
+      - ./services/ssl/aizberg_privkey.pem:/etc/ssl/certs/aizberg_privkey.pem
+      - ./services/ssl/aizberg_chain.pem:/etc/ssl/certs/aizberg_chain.pem
+      - ./services/ssl/aizberg_redirect_fullchain.pem:/etc/ssl/certs/aizberg_redirect_fullchain.pem
+      - ./services/ssl/aizberg_redirect_privkey.pem:/etc/ssl/certs/aizberg_redirect_privkey.pem
+      - ./services/ssl/aizberg_redirect_chain.pem:/etc/ssl/certs/aizberg_redirect_chain.pem
+      - ./services/ssl/dhparam.pem:/etc/ssl/certs/dhparam.pem
+      - ./services/ssl/.htpasswd:/etc/ngnix/.htpasswd
+    depends_on:
+      - app
+      - db
+      - queue_server
+    networks:
+      - app-network
+  # beanstalkd - queue service / hub.docker.com/r/maateen/docker-beanstalkd
+  queue_server:
+    image: maateen/docker-beanstalkd:master-alpine-latest
+    container_name: queue_server
+    restart: unless-stopped
+    user: "${HOST_USER_ID}:${HOST_GROUP_ID}"
+    environment:
+      PV_DIR: /var/lib/beanstalkd
+    volumes:
+      - ./services/data/beanstalkd:/var/lib/beanstalkd
+    networks:
+      - app-network
+  # Sphinxsearch - /r/macbre/sphinxsearch
+  sphinx:
+    build:
+      context: ./docker/build/sphinx
+      dockerfile: Dockerfile
+    container_name: sphinx
+    restart: unless-stopped
+    environment:
+      SPHINX_DB_HOST: localhost
+      SPHINX_DB_USER: ${DB_USERNAME}
+      SPHINX_DB_PASSWORD: ${DB_PASSWORD}
+      SPHINX_DB_NAME: ${DB_DATABASE}
+      SPHINX_DB_PORT: 3306
+    volumes:
+      - ./services/data/sphinx/data:/opt/sphinx/data
+      - ./services/configs/sphinx/sphinx.conf.template:/opt/sphinx/conf/sphinx.conf.template
+      - ./services/data/mysql_socket:/run/mysqld
+    mem_limit: 512m
+    networks:
+      - app-network
+  # MySQL / hub.docker.com/_/mariadb/
+  db:
+    image: mariadb:lts-jammy
+    container_name: db
+    restart: unless-stopped
+    #user: "${HOST_USER_ID}:${HOST_GROUP_ID}"
+    environment:
+      MYSQL_DATABASE: ${DB_DATABASE}
+      MYSQL_USER: ${DB_USERNAME}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+    volumes:
+      - ./services/data/mysql:/var/lib/mysql
+      - ./services/configs/mysql/app.cnf:/etc/mysql/conf.d/app.cnf
+      - ./services/logs/mysql:/var/log/mysql
+      - ./services/data/mysql_socket:/var/run/mysqld
+    networks:
+      - app-network
+  # Memcached / hub.docker.com/_/memcached
+  memcached:
+    image: bitnami/memcached:latest
+    container_name: memcached
+    restart: unless-stopped
+    user: "${HOST_USER_ID}:${HOST_GROUP_ID}"
+    environment:
+      - MEMCACHED_MEMORY_LIMIT=512m
+    networks:
+      - app-network
+# Docker Networks
+networks:
+  app-network:
+    driver: bridge

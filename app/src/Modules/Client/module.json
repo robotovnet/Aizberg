@@ -1,0 +1,23 @@
+{
+    "name": "Client",
+    "title": "Client",
+    "authors": [
+        {
+            "name": "Sergey Chernyi",
+            "email": "2@sergeyy.ru",
+            "role": "Developer"
+        }
+    ],
+    "description": "Client Module",
+    "alias": "client",
+    "version": "0.1.0",
+    "minimumCoreVersion": "0.1.0",
+    "keywords": [],
+    "priority": 0,
+    "providers": [
+        "Modules\\Client\\Providers\\ClientServiceProvider"
+    ],
+    "aliases": {},
+    "files": [],
+    "requires": ["Settings", "Country", "Currency", "Timezone", "Language", "City", "Sms"]
+}

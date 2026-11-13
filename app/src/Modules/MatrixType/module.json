@@ -1,0 +1,13 @@
+{
+    "name": "MatrixType",
+    "alias": "matrix-type",
+    "description": "",
+    "keywords": [],
+    "priority": 0,
+    "providers": [
+        "Modules\\MatrixType\\Providers\\MatrixTypeServiceProvider"
+    ],
+    "aliases": {},
+    "files": [],
+    "requires": []
+}

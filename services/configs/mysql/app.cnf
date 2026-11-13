@@ -1,0 +1,44 @@
+[mariadb]
+bind_address                    = 0.0.0.0 # 127.0.0.1
+pid_file                        = /var/lib/mysql/mysqld.pid
+socket                          = /var/run/mysqld/mysqld.sock
+
+skip-name-resolve
+#skip-networking
+performance_schema = ON
+
+# === INNODB Settings ===
+innodb_file_per_table = 1
+innodb_buffer_pool_size         = 4G
+innodb_log_file_size            = 1G
+join_buffer_size                = 8M
+innodb_log_buffer_size          = 32M
+
+# === Search Settings ===
+ft_min_word_len                 = 2 # Minimum length of words to be indexed for search results
+innodb_ft_min_token_size        = 2
+
+# === Binary Logging ===
+#skip-log-bin
+log_bin = 1
+expire_logs_days = 10
+max_binlog_size = 500M
+binlog_format = mixed
+
+# Slow queries
+# https://mariadb.com/kb/en/slow-query-log-overview/
+log_output = FILE
+slow_query_log = 0
+slow_query_log_file = /var/log/mysql/slow.log
+log_queries_not_using_indexes = 1
+log_slow_query_time = 5.0
+long_query_time = 5.0
+
+# Log errors
+log_error = /var/log/mysql/errors.log
+log_queries_not_using_indexes = ON
+log_warnings = 2
+
+# Log all queries
+general_log = 0
+general_log_file = /var/log/mysql/general.log

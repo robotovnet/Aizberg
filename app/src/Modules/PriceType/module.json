@@ -1,0 +1,23 @@
+{
+    "name": "PriceType",
+    "title": "PriceType",
+    "authors": [
+        {
+            "name": "Sergey Chernyi",
+            "email": "2@sergeyy.ru",
+            "role": "Developer"
+        }
+    ],
+    "description": "Price Type Module",
+    "alias": "pricetype",
+    "version": "0.1.0",
+    "minimumCoreVersion": "0.1.0",
+    "keywords": [],
+    "priority": 0,
+    "providers": [
+        "Modules\\PriceType\\Providers\\PriceTypeServiceProvider"
+    ],
+    "aliases": {},
+    "files": [],
+    "requires": ["Staff"]
+}
