@@ -44,23 +44,6 @@ class DashboardMenus extends Seeder
                 'created_at'   => Carbon::now()->format('Y-m-d H:i:s'),
                 'updated_at'   => Carbon::now()->format('Y-m-d H:i:s'),
             ],
-            [
-                'name'       => Str::getLangJson([
-                    'ru' => 'Фиды данных',
-                    'en' => 'Feeds',
-                ]),
-                'code'         => '3_feeds',
-                'href'         => '/dashboard/feeds',
-                'parent'       => '2_integrations',
-                'image_src'    => null,
-                'image_inline' => null,
-                'level'        => 3,
-                'policy'       => 'feeds.view',
-                'order'        => '10000',
-                'created_at'   => Carbon::now()->format('Y-m-d H:i:s'),
-                'updated_at'   => Carbon::now()->format('Y-m-d H:i:s'),
-            ],
-
         ];
 
         if (Schema::hasTable($this->table)) {

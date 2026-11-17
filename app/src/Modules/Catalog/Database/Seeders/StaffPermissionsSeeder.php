@@ -184,19 +184,6 @@ class StaffPermissionsSeeder extends Seeder
                 'created_at' => Carbon::now()->format('Y-m-d H:i:s'),
                 'updated_at' => Carbon::now()->format('Y-m-d H:i:s'),
             ],
-            [
-                'name'       => Str::getLangJson([
-                                                     'ru' => 'Просмотр фидов данных',
-                                                     'en' => 'Viewing data feeds',
-                                                 ]),
-                'group_name' => Str::getLangJson([
-                                                     'ru' => 'Товары',
-                                                     'en' => 'Products',
-                                                 ]),
-                'policy'     => 'feeds.view',
-                'created_at' => Carbon::now()->format('Y-m-d H:i:s'),
-                'updated_at' => Carbon::now()->format('Y-m-d H:i:s'),
-            ],
         ];
 
         if (Schema::hasTable($this->table)) {

@@ -12,7 +12,7 @@
 
 **Aizberg — платформа для интернет-магазинов.** Открытый движок, админ-панель. Запускайте и развивайте магазин на своих условиях.
 
-> **Этот репозиторий — только API и бэкенд.** Админ-панель (Aizberg-front) — отдельный открытый проект в собственном репозитории; ссылка появится здесь после его публикации.
+> **Этот репозиторий — только API и бэкенд.** Админ-панель — отдельный открытый проект в собственном репозитории: [github.com/robotovnet/Aizberg-front](https://github.com/robotovnet/Aizberg-front).
 
 ## Содержание
 
@@ -65,7 +65,7 @@
 | `sphinx` | Sphinx Search 3.7 — поисковый индекс товаров |
 | `memcached` | Кеш |
 | `queue_server` | Beanstalkd — сервер очередей |
-| `cp` | Панель управления, собирается из исходников Aizberg-front |
+| `cp` | Панель управления, собирается из исходников [Aizberg-front](https://github.com/robotovnet/Aizberg-front) |
 | `adminer` | Веб-интерфейс к базе данных |
 
 Приложение — модульный монолит на [nwidart/laravel-modules](https://github.com/nWidart/laravel-modules). Публичный сайт магазина и панель управления — отдельные приложения, которые работают с этим бэкендом по HTTP API.
@@ -97,7 +97,14 @@
 
    Для локального запуска укажите в `.env` значение `BASIC_AUTH_ENABLED=off`.
 
-3. Пока репозиторий Aizberg-front не опубликован, отключите панель управления: закомментируйте сервис `cp` в [docker-compose.yml](docker-compose.yml) и блок `server` с `listen 8443` в [laravel_ssl.conf.template](services/configs/nginx/laravel_ssl.conf.template). Без этого сборка завершится ошибкой, а Nginx не запустится.
+3. Клонируйте панель управления [Aizberg-front](https://github.com/robotovnet/Aizberg-front) и создайте её файл окружения — переменные описаны в [README панели](https://github.com/robotovnet/Aizberg-front#конфигурация):
+
+   ```bash
+   git clone https://github.com/robotovnet/Aizberg-front.git /srv/Aizberg-front
+   cp /srv/Aizberg-front/.env.example /srv/Aizberg-front/.env
+   ```
+
+   Если панель управления не нужна, закомментируйте сервис `cp` в [docker-compose.yml](docker-compose.yml) и блок `server` с `listen 8443` в [laravel_ssl.conf.template](services/configs/nginx/laravel_ssl.conf.template). Без исходников панели сборка завершится ошибкой, а Nginx не запустится.
 
 4. Соберите и запустите контейнеры:
 
@@ -127,7 +134,7 @@
    docker compose exec sphinx indexer --config /opt/sphinx/conf/sphinx.conf --rotate --all
    ```
 
-После установки магазин и API доступны на порту `WEBSERVER_PORT_SSL`, Adminer — на порту `ADMINER_PORT`.
+После установки магазин и API доступны на порту `WEBSERVER_PORT_SSL`, панель управления — на порту `CP_PORT`, Adminer — на порту `ADMINER_PORT`.
 
 ### Первый вход
 
